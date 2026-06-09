@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kiwoom-trade 원격 모니터</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 16px;
+         background:#16191D; color:#E6E6E6; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  h2 { font-size: 14px; color:#9AA0A6; margin: 18px 0 8px; }
+  input { padding:8px 10px; border-radius:8px; border:1px solid #2A2F36; background:#1E232A; color:#E6E6E6; }
+  button { padding:8px 14px; border-radius:8px; border:0; background:#1DB954; color:#08130b; font-weight:700; cursor:pointer; }
+  button.ghost { background:#2A2F36; color:#E6E6E6; }
+  .login { display:flex; gap:8px; flex-wrap:wrap; align-items:center; max-width:760px; }
+  .bar { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap:12px; }
+  .card { background:#1E232A; border:1px solid #2A2F36; border-radius:12px; padding:14px; }
+  .agent .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
+  .online{background:#1DB954;} .stale{background:#E0A106;} .offline{background:#8a1f1f;}
+  .sym { font-size:16px; font-weight:700; }
+  .act { display:inline-block; padding:2px 8px; border-radius:6px; font-size:12px; margin-left:6px; }
+  .PLACED,.CANCELLED{background:#1e6b34;} .BLOCKED,.ERROR{background:#8a1f1f;}
+  .NOOP,.KEEP{background:#333;} .WOULD_PLACE,.WOULD_CANCEL{background:#264f8a;}
+  .row { font-size:13px; color:#B8BCC4; margin-top:4px; }
+  .ts { font-size:11px; color:#777; margin-top:8px; }
+  .err { color:#e06c6c; font-size:13px; margin:8px 0; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:6px 8px; border-bottom:1px solid #2A2F36; white-space:nowrap; }
+  th { color:#9AA0A6; font-weight:600; }
+  .tag { padding:1px 6px; border-radius:5px; font-size:11px; }
+  .live { background:#1e6b34; }
+  .preview { background:#444; color:#cfcfcf; }
+  .hidden { display:none; }
+  .cmds { margin-top:10px; display:flex; gap:6px; flex-wrap:wrap; }
+  .cmds button { padding:5px 10px; font-size:12px; }
+  .pause { background:#E0A106; color:#1a1a1a; }
+  .resume { background:#2A2F36; color:#E6E6E6; }
+  .estop { background:#c0392b; color:#fff; }
+  .runnow { background:#2d7ef7; color:#fff; }
+  .mode-live { background:#1e6b34; color:#fff; }
+  .mode-prev { background:#2A2F36; color:#E6E6E6; }
+  .st-queued{color:#E0A106;} .st-running{color:#2d7ef7;} .st-succeeded{color:#1DB954;}
+  .st-failed,.st-expired,.st-cancelled{color:#e06c6c;}
+  .srow{ display:flex; gap:6px; align-items:center; margin:4px 0; font-size:13px; }
+  .srow label{ color:#9AA0A6; min-width:62px; }
+  .srow input[type=text],.srow input:not([type]){ flex:0 0 auto; }
+  #sheets .card button{ background:#2d7ef7; color:#fff; }
+</style>
+</head>
+<body>
+  <h1>kiwoom-trade 원격 모니터</h1>
+
+  <!-- 로그인 -->
+  <div id="loginBox" class="login">
+    <input id="url" placeholder="Supabase URL (https://xxx.supabase.co)" size="32">
+    <input id="key" placeholder="anon key" size="28" type="password">
+    <input id="email" placeholder="관리계정 이메일" size="18">
+    <input id="pw" placeholder="비밀번호" size="14" type="password">
+    <button onclick="login()">로그인</button>
+    <label style="font-size:13px"><input type="checkbox" id="remember" checked> 기억</label>
+  </div>
+
+  <!-- 로그인 후 -->
+  <div id="app" class="hidden">
+    <div class="bar">
+      <span id="who" class="row"></span>
+      <button class="ghost" onclick="logout()">로그아웃</button>
+      <button class="ghost" onclick="refresh()">새로고침</button>
+      <label style="font-size:13px"><input type="checkbox" id="auto" checked> 10초 자동</label>
+    </div>
+
+    <h2>내 PC (에이전트)</h2>
+    <div id="agents" class="grid"></div>
+
+    <h2>시트 설정 (원격 편집 → PC 자동 반영)</h2>
+    <div id="sheets" class="grid"></div>
+
+    <h2>작업 현재 상태</h2>
+    <div id="status" class="grid"></div>
+
+    <h2>최근 주문 (추정=미리보기 / 실주문 구분)</h2>
+    <div id="orders"></div>
+
+    <h2>원격 명령 기록</h2>
+    <div id="commands"></div>
+  </div>
+
+  <div id="msg" class="err"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+// Supabase는 UTC로 저장 → 브라우저 현지 시간(KST 등)으로 변환해 표시.
+const _p2 = n => String(n).padStart(2,'0');
+function fmtTime(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso).replace('T',' ').slice(0,19);
+  return `${d.getFullYear()}-${_p2(d.getMonth()+1)}-${_p2(d.getDate())} `+
+         `${_p2(d.getHours())}:${_p2(d.getMinutes())}:${_p2(d.getSeconds())}`;
+}
+function fmtTimeShort(iso){ const s = fmtTime(iso); return s.length>=19 ? s.slice(5) : s; }
+// 호스팅(웹) 배포 시 Supabase 주소/anon key 를 채워두면 접속 시 이메일·비번만 입력.
+// (anon key 는 클라이언트용 공개 키 — RLS 가 데이터 보호. 공개돼도 안전)
+const DEFAULT_URL = 'https://pmirluxobczxcgwbogxa.supabase.co';
+const DEFAULT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBtaXJsdXhvYmN6eGNnd2JvZ3hhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3NjUwNjMsImV4cCI6MjA5NjM0MTA2M30.UF7RkhCVDwD_8oasfWhRguWda5vc7NesUSw3Bq2Z9V0';
+let URL_='', KEY_='', TOKEN_='';
+
+// localStorage 가 막힌 환경(file:/data: URL 등)에서도 죽지 않게 try/catch.
+// 저장이 안 되면 '기억'만 동작 안 할 뿐, 로그인/조회는 정상.
+function lset(k,v){ try { localStorage.setItem('kt_'+k, v); } catch(e){} }
+function lget(k,d=''){ try { return localStorage.getItem('kt_'+k) || d; } catch(e){ return d; } }
+function ldel(k){ try { localStorage.removeItem('kt_'+k); } catch(e){} }
+
+window.onload = () => {
+  const u0 = lget('url') || DEFAULT_URL, k0 = lget('key') || DEFAULT_KEY;
+  $('url').value = u0; $('key').value = k0; $('email').value = lget('email');
+  const tok = lget('token');
+  if (u0 && k0 && tok) { URL_=u0; KEY_=k0; TOKEN_=tok; showApp(); refresh(); }
+  setInterval(() => { if (!$('app').classList.contains('hidden') && $('auto').checked) refresh(); }, 10000);
+};
+
+async function login(){
+  $('msg').textContent = '';
+  URL_ = $('url').value.trim().replace(/\/$/,''); KEY_ = $('key').value.trim();
+  const email = $('email').value.trim(), pw = $('pw').value;
+  if (!URL_ || !KEY_ || !email || !pw){ $('msg').textContent='모든 칸을 입력하세요.'; return; }
+  try {
+    const r = await fetch(`${URL_}/auth/v1/token?grant_type=password`, {
+      method:'POST', headers:{ apikey:KEY_, 'Content-Type':'application/json' },
+      body: JSON.stringify({ email, password: pw })
+    });
+    if (!r.ok){ $('msg').textContent = `로그인 실패 ${r.status}: ${await r.text()}`; return; }
+    const d = await r.json();
+    TOKEN_ = d.access_token;
+    if ($('remember').checked){ lset('url',URL_); lset('key',KEY_); lset('email',email); lset('token',TOKEN_); }
+    $('who').textContent = email + ' 로 로그인됨';
+    showApp(); refresh();
+  } catch(e){ $('msg').textContent = '네트워크 오류: ' + e; }
+}
+
+function logout(){ ldel('token'); TOKEN_=''; location.reload(); }
+function showApp(){ $('loginBox').classList.add('hidden'); $('app').classList.remove('hidden'); }
+
+async function api(path){
+  const r = await fetch(`${URL_}/rest/v1/${path}`, {
+    headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_ }
+  });
+  if (r.status===401){ $('msg').textContent='세션 만료 — 다시 로그인하세요.'; throw new Error('401'); }
+  if (!r.ok) throw new Error(r.status+': '+await r.text());
+  return r.json();
+}
+
+async function refresh(){
+  $('msg').textContent='';
+  try {
+    const [agents, status, orders, commands] = await Promise.all([
+      api('agents?select=*&order=last_seen_at.desc'),
+      api('bot_status?select=*&order=ts.desc'),
+      api('orders?select=*&order=ts.desc&limit=100'),
+      api('commands?select=*&order=created_at.desc&limit=20'),
+    ]);
+    renderAgents(agents); renderStatus(status); renderOrders(orders); renderCommands(commands);
+    // sheets 테이블은 없을 수도 있어(스키마 미적용) 별도 try — 대시보드 전체가 깨지지 않게.
+    try { renderSheets(await api('sheets?select=*&order=name')); }
+    catch(e){ $('sheets').innerHTML = '<div class="row">시트 테이블 없음 — schema.sql의 sheets 테이블을 Supabase에 추가하세요.</div>'; }
+  } catch(e){ if(String(e.message)!=='401') $('msg').textContent='오류: '+e.message; }
+}
+
+function uuid(){
+  try { return crypto.randomUUID(); } catch(e){ return 'k'+Math.random().toString(16).slice(2)+'_'+new Date().getTime(); }
+}
+
+// 원격 명령 전송 — commands 에 한 줄 insert (TTL 2분 + idempotency_key).
+async function sendCmd(agentId, type, payload){
+  payload = payload || {};
+  const labels = { pause:'일시정지', resume:'재개', emergency_stop:'비상정지',
+                   run_now:'즉시 실행', set_mode:'모드 변경' };
+  if (type==='emergency_stop' && !confirm('비상정지: 매매를 즉시 정지합니다(‘정지’ 버튼과 동일). 진행할까요?')) return;
+  if (type==='set_mode' && payload.mode==='live' &&
+      !confirm('⚠️ 실행(실주문) 모드로 바꿉니다. 이제부터 실제 주문이 나갑니다. 진행할까요?')) return;
+  const body = {
+    agent_id: agentId, type: type,
+    requested_by: lget('email','web'),
+    idempotency_key: uuid(),
+    expires_at: new Date(Date.now()+120000).toISOString(),
+    payload: payload
+  };
+  try {
+    const r = await fetch(`${URL_}/rest/v1/commands`, {
+      method:'POST',
+      headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, 'Content-Type':'application/json', Prefer:'return=minimal' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok){ $('msg').textContent = `명령 실패 ${r.status}: ${await r.text()}`; return; }
+    $('msg').textContent = `'${labels[type]||type}' 명령 보냄 — 봇이 받으면 상태가 바뀝니다.`;
+    setTimeout(refresh, 1500);
+  } catch(e){ $('msg').textContent = '명령 전송 오류: ' + e; }
+}
+
+function renderCommands(rows){
+  const head = `<table><tr><th>시각</th><th>PC</th><th>명령</th><th>상태</th><th>요청자</th><th>결과</th></tr>`;
+  const body = rows.map(c => `<tr>
+    <td>${esc(fmtTimeShort(c.created_at))}</td>
+    <td>${esc((c.agent_id||'').slice(0,8))}</td>
+    <td>${esc(c.type)}</td>
+    <td class="st-${esc(c.status)}">${esc(c.status)}</td>
+    <td>${esc(c.requested_by||'')}</td>
+    <td>${esc(c.result_message||'')}</td>
+  </tr>`).join('');
+  $('commands').innerHTML = head + (body || '<tr><td colspan="6" class="row">명령 없음</td></tr>') + '</table>';
+}
+
+function freshness(ts, intervalSec){
+  if(!ts) return 'offline';
+  const age = (Date.now() - new Date(ts).getTime())/1000;
+  const iv = intervalSec || 15;
+  if (age <= iv*2.5) return 'online';
+  if (age <= iv*6) return 'stale';
+  return 'offline';
+}
+
+function renderAgents(rows){
+  $('agents').innerHTML = rows.map(a => {
+    const st = freshness(a.last_seen_at, a.heartbeat_interval_sec);
+    const label = st==='online'?'온라인': st==='stale'?'지연':'오프라인';
+    const id = esc(a.agent_id);
+    const nick = (a.nickname||a.agent_id||'').replace(/'/g,'');
+    return `<div class="card agent">
+      <div class="sym"><span class="dot ${st}"></span>${esc(a.nickname||a.agent_id)} <span class="row">${label}</span></div>
+      <div class="row">${esc(a.running?'▶ 가동중':'■ 정지')} · ${esc(a.current_mode||'')}</div>
+      <div class="row">버전 ${esc(a.version||'-')}</div>
+      ${a.last_error?`<div class="err">${esc(a.last_error)}</div>`:''}
+      <div class="ts">최근 신호 ${esc(fmtTime(a.last_seen_at))}</div>
+      <div class="cmds">
+        <button class="pause" onclick="sendCmd('${id}','pause')">일시정지</button>
+        <button class="resume" onclick="sendCmd('${id}','resume')">재개</button>
+        <button class="estop" onclick="sendCmd('${id}','emergency_stop')">비상정지</button>
+      </div>
+      <div class="cmds">
+        <button class="mode-prev" onclick="sendCmd('${id}','set_mode',{mode:'preview'})">미리보기로</button>
+        <button class="mode-live" onclick="sendCmd('${id}','set_mode',{mode:'live'})">실행(실주문)으로</button>
+        <button class="ghost" onclick="deleteAgent('${id}','${esc(nick)}')">삭제</button>
+      </div>
+    </div>`;
+  }).join('') || '<div class="row">등록된 PC 없음</div>';
+}
+
+// 사용하지 않는 PC(에이전트) + 그 기록 삭제 (RLS for-all 이라 소유자는 삭제 가능).
+async function deleteAgent(agentId, nick){
+  if(!confirm(`'${nick}' PC와 그 기록을 삭제할까요? (되돌릴 수 없음)`)) return;
+  try {
+    for (const t of ['agents','bot_status','orders','commands']){
+      await fetch(`${URL_}/rest/v1/${t}?agent_id=eq.${encodeURIComponent(agentId)}`, {
+        method:'DELETE',
+        headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, Prefer:'return=minimal' }
+      });
+    }
+    $('msg').textContent = `'${nick}' 삭제됨.`;
+    refresh();
+  } catch(e){ $('msg').textContent = '삭제 오류: ' + e; }
+}
+
+// ── 시트 설정 원격 편집 ──────────────────────────────────────
+let _sheets = {};
+function renderSheets(rows){
+  _sheets = {};
+  $('sheets').innerHTML = (rows||[]).map((s,i) => {
+    const p = s.payload || {};
+    _sheets[i] = { name: s.name, payload: p, version: s.version||1 };
+    return `<div class="card">
+      <div class="sym">${esc(s.name)} <span class="row">v${esc(s.version)}</span></div>
+      <div class="srow"><label>종목</label><input id="sh_sym_${i}" value="${esc(p.symbol||'')}" size="8"></div>
+      <div class="srow"><label>계좌</label><input id="sh_acc_${i}" value="${esc(p.account_no||'')}" size="12"></div>
+      <div class="srow"><label>총투자금</label><input id="sh_seed_${i}" value="${esc(p.seed_amount??0)}" size="10"></div>
+      <div class="srow"><label>총라인수</label><input id="sh_lines_${i}" value="${esc(p.total_lines??0)}" size="5"></div>
+      <div class="srow"><label>1라인가</label><input id="sh_fp_${i}" value="${esc(p.first_buy_price??0)}" size="8"></div>
+      <div class="srow">
+        <label><input type="checkbox" id="sh_bl_${i}" ${p.buy_limit?'checked':''}> 매수제한</label>
+        <label><input type="checkbox" id="sh_sl_${i}" ${p.sell_limit?'checked':''}> 매도제한</label>
+      </div>
+      <div class="cmds"><button onclick="saveSheet(${i})">저장(원격→PC)</button></div>
+    </div>`;
+  }).join('') || '<div class="row">원격 시트 없음 — PC 시트 탭에서 \'원격↑\'로 올리세요.</div>';
+}
+
+async function saveSheet(i){
+  const s = _sheets[i]; if(!s) return;
+  const p = Object.assign({}, s.payload);   // 기존 payload(line_settings 등) 보존
+  p.name = s.name;
+  p.symbol = $('sh_sym_'+i).value.trim();
+  p.account_no = $('sh_acc_'+i).value.trim();
+  p.seed_amount = parseFloat($('sh_seed_'+i).value)||0;
+  p.total_lines = parseInt($('sh_lines_'+i).value)||0;
+  p.first_buy_price = parseFloat($('sh_fp_'+i).value)||0;
+  p.buy_limit = $('sh_bl_'+i).checked;
+  p.sell_limit = $('sh_sl_'+i).checked;
+  const nv = (s.version||1) + 1;
+  if(!confirm(`시트 '${s.name}' 설정을 저장할까요? (실매매 파라미터가 바뀝니다)`)) return;
+  try {
+    const r = await fetch(`${URL_}/rest/v1/sheets?name=eq.${encodeURIComponent(s.name)}`, {
+      method:'PATCH',
+      headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, 'Content-Type':'application/json', Prefer:'return=minimal' },
+      body: JSON.stringify({ payload: p, version: nv })
+    });
+    if(!r.ok){ $('msg').textContent = `시트 저장 실패 ${r.status}: ${await r.text()}`; return; }
+    $('msg').textContent = `시트 '${s.name}' 저장됨 v${nv} — 각 PC가 약 1분 내 자동 반영합니다.`;
+    refresh();
+  } catch(e){ $('msg').textContent = '시트 저장 오류: ' + e; }
+}
+
+function renderStatus(rows){
+  $('status').innerHTML = rows.map(d => `
+    <div class="card">
+      <div class="sym">${esc(d.symbol || d.sheet || d.id)}<span class="act ${esc(d.action)}">${esc(d.action)}</span></div>
+      <div class="row">${esc(d.task||'')} · ${esc(d.reason||'')}</div>
+      ${d.price!=null?`<div class="row">현재가 ${esc(d.price)} · 보유 ${esc(d.balance)} · 예수금 $${esc(d.usd)}</div>`:''}
+      ${d.open_orders!=null?`<div class="row">미체결 ${esc(d.open_orders)}건 · 계좌 ${esc(d.account)}</div>`:''}
+      <div class="ts">${esc(fmtTime(d.ts))}</div>
+      ${d.agent_id&&d.sheet?`<div class="cmds"><button class="runnow" onclick="sendCmd('${esc(d.agent_id)}','run_now',{sheet:'${esc(d.sheet)}'})">즉시 실행</button></div>`:''}
+    </div>`).join('') || '<div class="row">데이터 없음</div>';
+}
+
+function renderOrders(rows){
+  const head = `<table><tr><th>시각</th><th>PC작업</th><th>종목</th><th>동작</th><th>구분</th>
+    <th>가격</th><th>수량</th><th>층</th><th>유형</th><th>사유</th></tr>`;
+  const body = rows.map(o => `<tr>
+    <td>${esc(fmtTimeShort(o.ts))}</td>
+    <td>${esc(o.task||'')}</td>
+    <td>${esc(o.symbol||'')}</td>
+    <td><span class="act ${esc(o.action)}">${esc(o.action)}</span></td>
+    <td>${esc(o.side||'')}</td>
+    <td>${esc(o.price)}</td>
+    <td>${esc(o.qty)}</td>
+    <td>${o.from_line!=null?esc(o.from_line)+'→'+esc(o.to_line):''}</td>
+    <td><span class="tag ${o.live?'live':'preview'}">${o.live?'실주문':'추정'}</span></td>
+    <td>${esc(o.reason||'')}</td>
+  </tr>`).join('');
+  $('orders').innerHTML = head + (body || '<tr><td colspan="10" class="row">주문 없음</td></tr>') + '</table>';
+}
+</script>
+</body>
+</html>
