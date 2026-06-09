@@ -56,6 +56,10 @@
   table.lntab{ width:auto; font-size:12px; margin-top:6px; }
   table.lntab th,table.lntab td{ padding:2px 5px; text-align:center; white-space:nowrap; border-bottom:1px solid #23272d; }
   table.lntab input{ width:52px; padding:2px 4px; text-align:right; }
+  .tabs{ display:flex; gap:4px; margin:6px 0 14px; border-bottom:1px solid #2A2F36; flex-wrap:wrap; }
+  .tab{ background:transparent; color:#9AA0A6; border-radius:8px 8px 0 0; padding:8px 16px; font-weight:700; }
+  .tab.active{ background:#1E232A; color:#1DB954; }
+  .toggle-on{ background:#1e6b34; color:#fff; } .toggle-off{ background:#6b1e1e; color:#fff; }
 </style>
 </head>
 <body>
@@ -80,20 +84,30 @@
       <label style="font-size:13px"><input type="checkbox" id="auto" checked> 10초 자동</label>
     </div>
 
-    <h2>내 PC (에이전트)</h2>
-    <div id="agents" class="grid"></div>
+    <div class="tabs">
+      <button class="tab active" data-tab="monitor" onclick="showTab('monitor')">📊 모니터</button>
+      <button class="tab" data-tab="sheets" onclick="showTab('sheets')">⚙ 시트 설정</button>
+      <button class="tab" data-tab="logs" onclick="showTab('logs')">📜 기록</button>
+    </div>
 
-    <h2>시트 설정 (원격 편집 → PC 자동 반영)</h2>
-    <div id="sheets" class="grid"></div>
+    <div class="tabpane" data-pane="monitor">
+      <h2>내 PC (에이전트)</h2>
+      <div id="agents" class="grid"></div>
+      <h2>작업 현재 상태</h2>
+      <div id="status" class="grid"></div>
+    </div>
 
-    <h2>작업 현재 상태</h2>
-    <div id="status" class="grid"></div>
+    <div class="tabpane hidden" data-pane="sheets">
+      <h2>시트 설정 (원격 편집 → PC 자동 반영)</h2>
+      <div id="sheets" class="grid"></div>
+    </div>
 
-    <h2>최근 주문 (추정=미리보기 / 실주문 구분)</h2>
-    <div id="orders"></div>
-
-    <h2>원격 명령 기록</h2>
-    <div id="commands"></div>
+    <div class="tabpane hidden" data-pane="logs">
+      <h2>최근 주문 (추정=미리보기 / 실주문 구분)</h2>
+      <div id="orders"></div>
+      <h2>원격 명령 기록</h2>
+      <div id="commands"></div>
+    </div>
   </div>
 
   <div id="msg" class="err"></div>
@@ -152,6 +166,10 @@ async function login(){
 
 function logout(){ ldel('token'); TOKEN_=''; location.reload(); }
 function showApp(){ $('loginBox').classList.add('hidden'); $('app').classList.remove('hidden'); }
+function showTab(name){
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab===name));
+  document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('hidden', p.dataset.pane!==name));
+}
 
 async function api(path){
   const r = await fetch(`${URL_}/rest/v1/${path}`, {
@@ -186,10 +204,12 @@ function uuid(){
 async function sendCmd(agentId, type, payload){
   payload = payload || {};
   const labels = { pause:'일시정지', resume:'재개', emergency_stop:'비상정지',
-                   run_now:'즉시 실행', set_mode:'모드 변경' };
+                   run_now:'즉시 실행', set_mode:'모드 변경', set_active:'활성변경' };
   if (type==='emergency_stop' && !confirm('비상정지: 매매를 즉시 정지합니다(‘정지’ 버튼과 동일). 진행할까요?')) return;
   if (type==='set_mode' && payload.mode==='live' &&
       !confirm('⚠️ 실행(실주문) 모드로 바꿉니다. 이제부터 실제 주문이 나갑니다. 진행할까요?')) return;
+  if (type==='set_active' && payload.active===false &&
+      !confirm('이 작업을 비활성화할까요? 해당 시트 매매가 중단됩니다.')) return;
   const body = {
     agent_id: agentId, type: type,
     requested_by: lget('email','web'),
@@ -376,15 +396,22 @@ async function saveSheet(i){
 }
 
 function renderStatus(rows){
-  $('status').innerHTML = rows.map(d => `
+  $('status').innerHTML = rows.map(d => {
+    const isOn = d.active !== false;            // null/undefined = 활성으로 간주
+    return `
     <div class="card">
-      <div class="sym">${esc(d.symbol || d.sheet || d.id)}<span class="act ${esc(d.action)}">${esc(d.action)}</span></div>
+      <div class="sym">${esc(d.symbol || d.sheet || d.id)}
+        <span class="act ${esc(d.action)}">${esc(d.action)}</span>
+        <span class="tag ${isOn?'live':'preview'}">${isOn?'활성':'비활성'}</span></div>
       <div class="row">${esc(d.task||'')} · ${esc(d.reason||'')}</div>
       ${d.price!=null?`<div class="row">현재가 ${esc(d.price)} · 보유 ${esc(d.balance)} · 예수금 $${esc(d.usd)}</div>`:''}
       ${d.open_orders!=null?`<div class="row">미체결 ${esc(d.open_orders)}건 · 계좌 ${esc(d.account)}</div>`:''}
       <div class="ts">${esc(fmtTime(d.ts))}</div>
-      ${d.agent_id&&d.sheet?`<div class="cmds"><button class="runnow" onclick="sendCmd('${esc(d.agent_id)}','run_now',{sheet:'${esc(d.sheet)}'})">즉시 실행</button></div>`:''}
-    </div>`).join('') || '<div class="row">데이터 없음</div>';
+      ${d.agent_id&&d.sheet?`<div class="cmds">
+        <button class="runnow" onclick="sendCmd('${esc(d.agent_id)}','run_now',{sheet:'${esc(d.sheet)}'})">즉시 실행</button>
+        <button class="${isOn?'toggle-off':'toggle-on'}" onclick="sendCmd('${esc(d.agent_id)}','set_active',{sheet:'${esc(d.sheet)}',active:${!isOn}})">${isOn?'비활성화':'활성화'}</button>
+      </div>`:''}
+    </div>`; }).join('') || '<div class="row">데이터 없음</div>';
 }
 
 function renderOrders(rows){
