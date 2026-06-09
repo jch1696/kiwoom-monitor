@@ -49,6 +49,13 @@
   .srow label{ color:#9AA0A6; min-width:62px; }
   .srow input[type=text],.srow input:not([type]){ flex:0 0 auto; }
   #sheets .card button{ background:#2d7ef7; color:#fff; }
+  #sheets .card button.ghost{ background:#2A2F36; }
+  .srow input{ width:90px; }
+  .lineedit{ margin-top:8px; max-height:300px; overflow:auto; border-top:1px solid #2A2F36; padding-top:6px; }
+  .lineedit .srow input{ width:48px; }
+  table.lntab{ width:auto; font-size:12px; margin-top:6px; }
+  table.lntab th,table.lntab td{ padding:2px 5px; text-align:center; white-space:nowrap; border-bottom:1px solid #23272d; }
+  table.lntab input{ width:52px; padding:2px 4px; text-align:right; }
 </style>
 </head>
 <body>
@@ -283,9 +290,50 @@ function renderSheets(rows){
         <label><input type="checkbox" id="sh_bl_${i}" ${p.buy_limit?'checked':''}> 매수제한</label>
         <label><input type="checkbox" id="sh_sl_${i}" ${p.sell_limit?'checked':''}> 매도제한</label>
       </div>
-      <div class="cmds"><button onclick="saveSheet(${i})">저장(원격→PC)</button></div>
+      <div class="cmds">
+        <button class="ghost" onclick="toggleLines(${i})">라인별 비율 편집 ▼</button>
+        <button onclick="saveSheet(${i})">저장(원격→PC)</button>
+      </div>
+      <div id="lines_${i}" class="hidden lineedit"></div>
     </div>`;
   }).join('') || '<div class="row">원격 시트 없음 — PC 시트 탭에서 \'원격↑\'로 올리세요.</div>';
+}
+
+// 라인별 비율(시드%/매수%/매도%) 편집기 토글 — 현재 '총라인수'만큼 행 생성.
+function toggleLines(i){
+  const box = $('lines_'+i);
+  if(!box.classList.contains('hidden')){ box.classList.add('hidden'); return; }
+  const p = (_sheets[i]||{}).payload || {};
+  const ls = p.line_settings || [];
+  const total = parseInt($('sh_lines_'+i).value) || ls.length || 0;
+  const at = (k, key, def) => {
+    const r = ls[Math.min(k, ls.length-1)];               // 부족하면 마지막 값으로(전략과 동일)
+    return (r && r[key]!=null) ? r[key] : def;
+  };
+  let rows = '';
+  for(let L=1; L<=total; L++){
+    const k = L-1;
+    rows += `<tr><td>${L}</td>
+      <td><input id="ln_${i}_${L}_s" value="${esc(at(k,'seed_pct',2))}"></td>
+      <td><input id="ln_${i}_${L}_b" value="${esc(at(k,'buy_pct', L>1?-3:0))}"></td>
+      <td><input id="ln_${i}_${L}_x" value="${esc(at(k,'sell_pct',5))}"></td></tr>`;
+  }
+  box.dataset.total = total;
+  box.innerHTML = `
+    <div class="srow"><label>일괄</label>
+      시드<input id="bf_s_${i}" value="2"> 매수<input id="bf_b_${i}" value="-3"> 매도<input id="bf_x_${i}" value="5">
+      <button class="ghost" onclick="bulkFill(${i})">전 라인 적용</button>
+    </div>
+    <table class="lntab"><tr><th>라인</th><th>시드%</th><th>매수%</th><th>매도%</th></tr>${rows}</table>`;
+  box.classList.remove('hidden');
+}
+
+function bulkFill(i){
+  const total = parseInt($('lines_'+i).dataset.total)||0;
+  const s=$('bf_s_'+i).value, b=$('bf_b_'+i).value, x=$('bf_x_'+i).value;
+  for(let L=1; L<=total; L++){
+    $('ln_'+i+'_'+L+'_s').value=s; $('ln_'+i+'_'+L+'_b').value=b; $('ln_'+i+'_'+L+'_x').value=x;
+  }
 }
 
 async function saveSheet(i){
@@ -299,6 +347,20 @@ async function saveSheet(i){
   p.first_buy_price = parseFloat($('sh_fp_'+i).value)||0;
   p.buy_limit = $('sh_bl_'+i).checked;
   p.sell_limit = $('sh_sl_'+i).checked;
+  // 라인별 비율 편집기를 열었으면 그 표에서 line_settings 재구성(안 열었으면 기존 유지)
+  const box = $('lines_'+i);
+  const ltotal = box ? (parseInt(box.dataset.total)||0) : 0;
+  if(ltotal > 0 && $('ln_'+i+'_1_s')){
+    const ls = [];
+    for(let L=1; L<=ltotal; L++){
+      const sd=$('ln_'+i+'_'+L+'_s'); if(!sd) break;
+      ls.push({ line:L,
+        seed_pct: parseFloat(sd.value)||0,
+        buy_pct:  parseFloat($('ln_'+i+'_'+L+'_b').value)||0,
+        sell_pct: parseFloat($('ln_'+i+'_'+L+'_x').value)||0 });
+    }
+    if(ls.length) p.line_settings = ls;
+  }
   const nv = (s.version||1) + 1;
   if(!confirm(`시트 '${s.name}' 설정을 저장할까요? (실매매 파라미터가 바뀝니다)`)) return;
   try {
