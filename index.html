@@ -87,6 +87,7 @@
     <div class="tabs">
       <button class="tab active" data-tab="monitor" onclick="showTab('monitor')">📊 모니터</button>
       <button class="tab" data-tab="sheets" onclick="showTab('sheets')">⚙ 시트 설정</button>
+      <button class="tab" data-tab="settle" onclick="showTab('settle')">🧾 정산</button>
       <button class="tab" data-tab="logs" onclick="showTab('logs')">📜 기록</button>
     </div>
 
@@ -100,6 +101,11 @@
     <div class="tabpane hidden" data-pane="sheets">
       <h2>시트 설정 (원격 편집 → PC 자동 반영)</h2>
       <div id="sheets" class="grid"></div>
+    </div>
+
+    <div class="tabpane hidden" data-pane="settle">
+      <h2>일일 정산 (매일 지정 시각 자동 기록)</h2>
+      <div id="settlements"></div>
     </div>
 
     <div class="tabpane hidden" data-pane="logs">
@@ -190,9 +196,11 @@ async function refresh(){
       api('commands?select=*&order=created_at.desc&limit=20'),
     ]);
     renderAgents(agents); renderStatus(status); renderOrders(orders); renderCommands(commands);
-    // sheets 테이블은 없을 수도 있어(스키마 미적용) 별도 try — 대시보드 전체가 깨지지 않게.
+    // sheets/settlements 테이블은 없을 수도 있어(스키마 미적용) 별도 try — 전체가 안 깨지게.
     try { renderSheets(await api('sheets?select=*&order=name')); }
     catch(e){ $('sheets').innerHTML = '<div class="row">시트 테이블 없음 — schema.sql의 sheets 테이블을 Supabase에 추가하세요.</div>'; }
+    try { renderSettlements(await api('settlements?select=*&order=date.desc,sheet.asc&limit=300')); }
+    catch(e){ $('settlements').innerHTML = '<div class="row">정산 테이블 없음 — schema.sql의 settlements 테이블을 Supabase에 추가하세요.</div>'; }
   } catch(e){ if(String(e.message)!=='401') $('msg').textContent='오류: '+e.message; }
 }
 
@@ -412,6 +420,24 @@ function renderStatus(rows){
         <button class="${isOn?'toggle-off':'toggle-on'}" onclick="sendCmd('${esc(d.agent_id)}','set_active',{sheet:'${esc(d.sheet)}',active:${!isOn}})">${isOn?'비활성화':'활성화'}</button>
       </div>`:''}
     </div>`; }).join('') || '<div class="row">데이터 없음</div>';
+}
+
+function renderSettlements(rows){
+  const pct = v => (v==null?'':(Number(v)*100).toFixed(2)+'%');
+  const n2  = v => (v==null?'':Number(v).toFixed(2));
+  const n0  = v => (v==null?'':Math.round(Number(v)));
+  const head = `<table><tr><th>날짜</th><th>시트</th><th>종목</th><th>티어</th><th>잔고(차)</th>
+    <th>투자금</th><th>예수금</th><th>주식평가금</th><th>잔고수익</th>
+    <th>매수예정</th><th>인출가능</th><th>아바타수익</th><th>매수</th><th>매도</th></tr>`;
+  const body = (rows||[]).map(d => `<tr>
+    <td>${esc(d.date)}</td><td>${esc(d.sheet)}</td><td>${esc(d.symbol)}</td>
+    <td>${esc(d.tier)}/${esc(d.total_tiers)}T</td>
+    <td>${esc(d.balance_qty)}(${esc(d.qty_change)})</td>
+    <td>${n0(d.invest)}</td><td>${n2(d.cash)}</td><td>${n2(d.stock_value)}</td><td>${pct(d.balance_return)}</td>
+    <td>${n0(d.planned_buy)}</td><td>${n0(d.withdrawable)}</td><td>${pct(d.avatar_return)}</td>
+    <td>${esc(d.buys)}</td><td>${esc(d.sells)}</td>
+  </tr>`).join('');
+  $('settlements').innerHTML = head + (body || '<tr><td colspan="14" class="row">정산 없음 — 봇이 지정 시각에 자동 기록합니다.</td></tr>') + '</table>';
 }
 
 function renderOrders(rows){
