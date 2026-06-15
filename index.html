@@ -60,6 +60,8 @@
   .tab{ background:transparent; color:#9AA0A6; border-radius:8px 8px 0 0; padding:8px 16px; font-weight:700; }
   .tab.active{ background:#1E232A; color:#1DB954; }
   .toggle-on{ background:#1e6b34; color:#fff; } .toggle-off{ background:#6b1e1e; color:#fff; }
+  .pcgroup{ margin-bottom:16px; }
+  .pchead{ font-weight:700; color:#cfd3da; font-size:14px; margin:8px 0 6px; padding-left:2px; }
 </style>
 </head>
 <body>
@@ -95,7 +97,7 @@
       <h2>내 PC (에이전트)</h2>
       <div id="agents" class="grid"></div>
       <h2>작업 현재 상태</h2>
-      <div id="status" class="grid"></div>
+      <div id="status"></div>
     </div>
 
     <div class="tabpane hidden" data-pane="sheets">
@@ -259,7 +261,10 @@ function freshness(ts, intervalSec){
   return 'offline';
 }
 
+let _agentNames = {};
 function renderAgents(rows){
+  _agentNames = {};
+  (rows||[]).forEach(a => { _agentNames[a.agent_id] = a.nickname || a.agent_id; });
   $('agents').innerHTML = rows.map(a => {
     const st = freshness(a.last_seen_at, a.heartbeat_interval_sec);
     const label = st==='online'?'온라인': st==='stale'?'지연':'오프라인';
@@ -403,10 +408,9 @@ async function saveSheet(i){
   } catch(e){ $('msg').textContent = '시트 저장 오류: ' + e; }
 }
 
-function renderStatus(rows){
-  $('status').innerHTML = rows.map(d => {
-    const isOn = d.active !== false;            // null/undefined = 활성으로 간주
-    return `
+function statusCard(d){
+  const isOn = d.active !== false;            // null/undefined = 활성으로 간주
+  return `
     <div class="card">
       <div class="sym">${esc(d.symbol || d.sheet || d.id)}
         <span class="act ${esc(d.action)}">${esc(d.action)}</span>
@@ -419,7 +423,20 @@ function renderStatus(rows){
         <button class="runnow" onclick="sendCmd('${esc(d.agent_id)}','run_now',{sheet:'${esc(d.sheet)}'})">즉시 실행</button>
         <button class="${isOn?'toggle-off':'toggle-on'}" onclick="sendCmd('${esc(d.agent_id)}','set_active',{sheet:'${esc(d.sheet)}',active:${!isOn}})">${isOn?'비활성화':'활성화'}</button>
       </div>`:''}
-    </div>`; }).join('') || '<div class="row">데이터 없음</div>';
+    </div>`;
+}
+
+function renderStatus(rows){
+  rows = rows || [];
+  if(!rows.length){ $('status').innerHTML = '<div class="row">데이터 없음</div>'; return; }
+  // PC(agent_id)별로 묶어서 표시
+  const groups = {};
+  rows.forEach(d => { (groups[d.agent_id||'-'] = groups[d.agent_id||'-'] || []).push(d); });
+  $('status').innerHTML = Object.keys(groups).map(aid => {
+    const name = _agentNames[aid] || (aid||'').slice(0,8) || 'PC';
+    const cards = groups[aid].map(statusCard).join('');
+    return `<div class="pcgroup"><div class="pchead">🖥 ${esc(name)}</div><div class="grid">${cards}</div></div>`;
+  }).join('');
 }
 
 function renderSettlements(rows){
