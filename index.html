@@ -37,6 +37,7 @@
   .hidden { display:none; }
   .cmds { margin-top:10px; display:flex; gap:6px; flex-wrap:wrap; }
   .cmds button { padding:5px 10px; font-size:12px; }
+  .pccolor { width:34px; height:26px; padding:0; border:1px solid #3a3f46; border-radius:6px; background:none; cursor:pointer; }
   .pause { background:#E0A106; color:#1a1a1a; }
   .resume { background:#2A2F36; color:#E6E6E6; }
   .runnow { background:#2d7ef7; color:#fff; }
@@ -259,14 +260,28 @@ function freshness(ts, intervalSec){
   return 'offline';
 }
 
-// ── PC(별명)별 고유 배경색 — 모니터/시트설정/정산에서 같은 PC는 같은 색 ──────
+// ── PC별 배경색 — 모니터/시트설정/정산에서 같은 PC는 같은 색 ────────────────
+//   사용자가 직접 고른 색(localStorage 'pccol_<key>')이 있으면 그 색, 없으면 해시 기본색.
 function pcHue(name){
   let h = 0; const s = String(name || '');
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return h % 360;
 }
-function pcBg(name){ return `hsl(${pcHue(name)} 32% 15%)`; }       // 카드 배경(어두운 톤)
-function pcAccent(name){ return `hsl(${pcHue(name)} 48% 46%)`; }   // 좌측 강조선
+function hslToHex(h, s, l){                       // 기본색을 컬러피커 초기값(hex)으로
+  s/=100; l/=100; const k=n=>(n+h/30)%12; const a=s*Math.min(l,1-l);
+  const f=n=>l-a*Math.max(-1,Math.min(k(n)-3,9-k(n),1));
+  const to=x=>Math.round(255*x).toString(16).padStart(2,'0');
+  return `#${to(f(0))}${to(f(8))}${to(f(4))}`;
+}
+function hexRgba(hex, a){
+  const m=/^#?([0-9a-fA-F]{6})$/.exec(hex||''); if(!m) return '';
+  const n=parseInt(m[1],16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+}
+function pcOverride(key){ return lget('pccol_'+key, ''); }            // 사용자 지정 hex 또는 ''
+function pcPickerValue(key){ return pcOverride(key) || hslToHex(pcHue(key),48,46); }
+function pcBg(key){ const o=pcOverride(key); return o ? hexRgba(o,0.18) : `hsl(${pcHue(key)} 32% 15%)`; }
+function pcAccent(key){ return pcOverride(key) || `hsl(${pcHue(key)} 48% 46%)`; }
+function setPcColor(key, hex){ if(hex) lset('pccol_'+key, hex); else ldel('pccol_'+key); refresh(); }
 // ★색 키 = PC(agent_id). 같은 PC면 에이전트 카드·작업상태·시트설정·정산이 모두 같은 색.
 //   시트설정엔 agent_id가 없어 모니터(bot_status)에서 시트명/작업별명→agent_id 매핑을 만든다.
 let _pcKeyBySheet = {};   // 시트명("BITU_유라") → agent_id
@@ -301,6 +316,11 @@ function renderAgents(rows){
         <button class="mode-prev" onclick="sendCmd('${id}','set_mode',{mode:'preview'})">미리보기로</button>
         <button class="mode-live" onclick="sendCmd('${id}','set_mode',{mode:'live'})">실행(실주문)으로</button>
         <button class="ghost" onclick="deleteAgent('${id}','${esc(nick)}')">삭제</button>
+      </div>
+      <div class="cmds" style="align-items:center;">
+        <label class="row">🎨 PC 색</label>
+        <input type="color" class="pccolor" value="${pcPickerValue(a.agent_id)}" onchange="setPcColor('${id}', this.value)" title="이 PC 색 — 시트도 따라감">
+        <button class="ghost" onclick="setPcColor('${id}','')">기본색</button>
       </div>
     </div>`;
   }).join('') || '<div class="row">등록된 PC 없음</div>';
