@@ -192,8 +192,8 @@ async function refresh(){
   $('msg').textContent='';
   try {
     const [agents, status, orders, commands] = await Promise.all([
-      api('agents?select=*&order=last_seen_at.desc'),
-      api('bot_status?select=*&order=ts.desc'),
+      api('agents?select=*&order=nickname.asc,agent_id.asc'),
+      api('bot_status?select=*&order=agent_id.asc,sheet.asc'),
       api('orders?select=*&order=ts.desc&limit=100'),
       api('commands?select=*&order=created_at.desc&limit=20'),
     ]);
@@ -470,10 +470,12 @@ function renderStatus(rows){
   // 시트설정 색 매핑용: 시트명/작업별명 → agent_id (시트설정엔 agent_id가 없으므로)
   _pcKeyBySheet = {}; _pcKeyByNick = {};
   rows.forEach(d => { if(d.sheet) _pcKeyBySheet[d.sheet] = d.agent_id; if(d.task) _pcKeyByNick[d.task] = d.agent_id; });
-  // PC(agent_id)별로 묶어서 표시
+  // PC(agent_id)별로 묶어서 표시. 그룹은 별명순으로 고정 정렬(순서가 안 바뀌도록).
   const groups = {};
   rows.forEach(d => { (groups[d.agent_id||'-'] = groups[d.agent_id||'-'] || []).push(d); });
-  $('status').innerHTML = Object.keys(groups).map(aid => {
+  const aname = aid => (_agentNames[aid] || (aid||''));
+  const order = Object.keys(groups).sort((a,b) => aname(a).localeCompare(aname(b), 'ko'));
+  $('status').innerHTML = order.map(aid => {
     const name = _agentNames[aid] || (aid||'').slice(0,8) || 'PC';
     const cards = groups[aid].map(statusCard).join('');
     // 배경은 시트(카드)별로 — 그룹 박스는 헤더만(전체 색칠 안 함)
