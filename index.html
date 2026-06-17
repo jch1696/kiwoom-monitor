@@ -267,12 +267,15 @@ function pcHue(name){
 }
 function pcBg(name){ return `hsl(${pcHue(name)} 32% 15%)`; }       // 카드 배경(어두운 톤)
 function pcAccent(name){ return `hsl(${pcHue(name)} 48% 46%)`; }   // 좌측 강조선
-// ★시트별 색 키 — 종목 + 작업별명. 세 탭(모니터/시트설정/정산)에서 동일하게 만들어
-//   같은 시트는 어디서나 같은 색이 되도록 한다.
-function sheetKey(symbol, nick){ return String(symbol||'').toUpperCase() + '|' + String(nick||''); }
-function sheetKeyFromName(name){                                    // "BITU_유라" → "BITU|유라"
+// ★색 키 = PC(agent_id). 같은 PC면 에이전트 카드·작업상태·시트설정·정산이 모두 같은 색.
+//   시트설정엔 agent_id가 없어 모니터(bot_status)에서 시트명/작업별명→agent_id 매핑을 만든다.
+let _pcKeyBySheet = {};   // 시트명("BITU_유라") → agent_id
+let _pcKeyByNick  = {};   // 작업별명("유라")    → agent_id
+function pcKeyForSheetName(name){
+  if (_pcKeyBySheet[name]) return _pcKeyBySheet[name];
   const s = String(name || ''); const i = s.indexOf('_');
-  return sheetKey(i >= 0 ? s.slice(0, i) : s, i >= 0 ? s.slice(i + 1) : '');
+  const nick = i >= 0 ? s.slice(i + 1) : s;
+  return _pcKeyByNick[nick] || nick;        // 매핑 없으면 별명으로 폴백(색은 나오되 정확 보장은 아님)
 }
 
 let _agentNames = {};
@@ -284,7 +287,7 @@ function renderAgents(rows){
     const label = st==='online'?'온라인': st==='stale'?'지연':'오프라인';
     const id = esc(a.agent_id);
     const nick = (a.nickname||a.agent_id||'').replace(/'/g,'');
-    return `<div class="card agent">
+    return `<div class="card agent" style="background:${pcBg(a.agent_id)};border-left:6px solid ${pcAccent(a.agent_id)};">
       <div class="sym"><span class="dot ${st}"></span>${esc(a.nickname||a.agent_id)} <span class="row">${label}</span></div>
       <div class="row">${esc(a.running?'▶ 가동중':'■ 정지')} · ${esc(a.current_mode||'')}</div>
       <div class="row">버전 ${esc(a.version||'-')}</div>
@@ -325,7 +328,7 @@ function renderSheets(rows){
   $('sheets').innerHTML = (rows||[]).map((s,i) => {
     const p = s.payload || {};
     _sheets[i] = { name: s.name, payload: p, version: s.version||1 };
-    const key = sheetKeyFromName(s.name);     // 모니터·정산과 같은 시트별 색
+    const key = pcKeyForSheetName(s.name);    // 모니터·정산과 같은 PC별 색
     return `<div class="card" style="background:${pcBg(key)};border-left:6px solid ${pcAccent(key)};">
       <div class="sym">${esc(s.name)} <span class="row">v${esc(s.version)}</span></div>
       <div class="srow"><label>종목</label><input id="sh_sym_${i}" value="${esc(p.symbol||'')}" size="8"></div>
@@ -424,7 +427,7 @@ async function saveSheet(i){
 
 function statusCard(d){
   const isOn = d.active !== false;            // null/undefined = 활성으로 간주
-  const key = sheetKey(d.symbol, d.task);     // 시트별 색(종목+작업별명)
+  const key = d.agent_id || d.task;           // PC별 색(같은 PC 시트는 같은 색)
   return `
     <div class="card" style="background:${pcBg(key)};border-left:6px solid ${pcAccent(key)};">
       <div class="sym">${esc(d.symbol || d.sheet || d.id)}
@@ -444,6 +447,9 @@ function statusCard(d){
 function renderStatus(rows){
   rows = rows || [];
   if(!rows.length){ $('status').innerHTML = '<div class="row">데이터 없음</div>'; return; }
+  // 시트설정 색 매핑용: 시트명/작업별명 → agent_id (시트설정엔 agent_id가 없으므로)
+  _pcKeyBySheet = {}; _pcKeyByNick = {};
+  rows.forEach(d => { if(d.sheet) _pcKeyBySheet[d.sheet] = d.agent_id; if(d.task) _pcKeyByNick[d.task] = d.agent_id; });
   // PC(agent_id)별로 묶어서 표시
   const groups = {};
   rows.forEach(d => { (groups[d.agent_id||'-'] = groups[d.agent_id||'-'] || []).push(d); });
@@ -462,7 +468,7 @@ function renderSettlements(rows){
   const head = `<table><tr><th>날짜</th><th>시트</th><th>종목</th><th>티어</th><th>잔고(차)</th>
     <th>투자금</th><th>예수금</th><th>주식평가금</th><th>잔고수익</th>
     <th>매수예정</th><th>인출가능</th><th>아바타수익</th><th>매수</th><th>매도</th></tr>`;
-  const body = (rows||[]).map(d => { const k = sheetKey(d.symbol, d.sheet); return `<tr style="background:${pcBg(k)}">
+  const body = (rows||[]).map(d => { const k = d.agent_id || d.sheet; return `<tr style="background:${pcBg(k)}">
     <td style="box-shadow:inset 6px 0 0 ${pcAccent(k)}">${esc(d.date)}</td><td>${esc(d.sheet)}</td><td>${esc(d.symbol)}</td>
     <td>${esc(d.tier)}/${esc(d.total_tiers)}T</td>
     <td>${esc(d.balance_qty)}(${esc(d.qty_change)})</td>
