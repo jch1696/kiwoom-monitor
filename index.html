@@ -39,7 +39,6 @@
   .cmds button { padding:5px 10px; font-size:12px; }
   .pause { background:#E0A106; color:#1a1a1a; }
   .resume { background:#2A2F36; color:#E6E6E6; }
-  .estop { background:#c0392b; color:#fff; }
   .runnow { background:#2d7ef7; color:#fff; }
   .mode-live { background:#1e6b34; color:#fff; }
   .mode-prev { background:#2A2F36; color:#E6E6E6; }
@@ -213,9 +212,8 @@ function uuid(){
 // 원격 명령 전송 — commands 에 한 줄 insert (TTL 2분 + idempotency_key).
 async function sendCmd(agentId, type, payload){
   payload = payload || {};
-  const labels = { pause:'일시정지', resume:'재개', emergency_stop:'비상정지',
+  const labels = { pause:'일시정지', resume:'재개',
                    run_now:'즉시 실행', set_mode:'모드 변경', set_active:'활성변경' };
-  if (type==='emergency_stop' && !confirm('비상정지: 매매를 즉시 정지합니다(‘정지’ 버튼과 동일). 진행할까요?')) return;
   if (type==='set_mode' && payload.mode==='live' &&
       !confirm('⚠️ 실행(실주문) 모드로 바꿉니다. 이제부터 실제 주문이 나갑니다. 진행할까요?')) return;
   if (type==='set_active' && payload.active===false &&
@@ -261,6 +259,19 @@ function freshness(ts, intervalSec){
   return 'offline';
 }
 
+// ── PC(별명)별 고유 배경색 — 모니터/시트설정/정산에서 같은 PC는 같은 색 ──────
+function pcHue(name){
+  let h = 0; const s = String(name || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+function pcBg(name){ return `hsl(${pcHue(name)} 32% 15%)`; }       // 카드/그룹 배경(어두운 톤)
+function pcAccent(name){ return `hsl(${pcHue(name)} 48% 46%)`; }   // 좌측 강조선
+function nickFromSheet(name){                                       // "BITU_유라" → "유라"
+  const s = String(name || ''); const i = s.indexOf('_');
+  return i >= 0 ? s.slice(i + 1) : s;
+}
+
 let _agentNames = {};
 function renderAgents(rows){
   _agentNames = {};
@@ -279,7 +290,6 @@ function renderAgents(rows){
       <div class="cmds">
         <button class="pause" onclick="sendCmd('${id}','pause')">일시정지</button>
         <button class="resume" onclick="sendCmd('${id}','resume')">재개</button>
-        <button class="estop" onclick="sendCmd('${id}','emergency_stop')">비상정지</button>
       </div>
       <div class="cmds">
         <button class="mode-prev" onclick="sendCmd('${id}','set_mode',{mode:'preview'})">미리보기로</button>
@@ -312,8 +322,9 @@ function renderSheets(rows){
   $('sheets').innerHTML = (rows||[]).map((s,i) => {
     const p = s.payload || {};
     _sheets[i] = { name: s.name, payload: p, version: s.version||1 };
-    return `<div class="card">
-      <div class="sym">${esc(s.name)} <span class="row">v${esc(s.version)}</span></div>
+    const nk = nickFromSheet(s.name);
+    return `<div class="card" style="background:${pcBg(nk)};border-left:6px solid ${pcAccent(nk)};">
+      <div class="sym">${esc(s.name)} <span class="row">🖥 ${esc(nk)} · v${esc(s.version)}</span></div>
       <div class="srow"><label>종목</label><input id="sh_sym_${i}" value="${esc(p.symbol||'')}" size="8"></div>
       <div class="srow"><label>계좌</label><input id="sh_acc_${i}" value="${esc(p.account_no||'')}" size="12"></div>
       <div class="srow"><label>총투자금</label><input id="sh_seed_${i}" value="${esc(p.seed_amount??0)}" size="10"></div>
@@ -435,7 +446,8 @@ function renderStatus(rows){
   $('status').innerHTML = Object.keys(groups).map(aid => {
     const name = _agentNames[aid] || (aid||'').slice(0,8) || 'PC';
     const cards = groups[aid].map(statusCard).join('');
-    return `<div class="pcgroup"><div class="pchead">🖥 ${esc(name)}</div><div class="grid">${cards}</div></div>`;
+    return `<div class="pcgroup" style="background:${pcBg(name)};border-left:6px solid ${pcAccent(name)};border-radius:10px;padding:8px 12px;">`
+      + `<div class="pchead">🖥 ${esc(name)}</div><div class="grid">${cards}</div></div>`;
   }).join('');
 }
 
@@ -446,8 +458,8 @@ function renderSettlements(rows){
   const head = `<table><tr><th>날짜</th><th>시트</th><th>종목</th><th>티어</th><th>잔고(차)</th>
     <th>투자금</th><th>예수금</th><th>주식평가금</th><th>잔고수익</th>
     <th>매수예정</th><th>인출가능</th><th>아바타수익</th><th>매수</th><th>매도</th></tr>`;
-  const body = (rows||[]).map(d => `<tr>
-    <td>${esc(d.date)}</td><td>${esc(d.sheet)}</td><td>${esc(d.symbol)}</td>
+  const body = (rows||[]).map(d => `<tr style="background:${pcBg(d.sheet)}">
+    <td style="box-shadow:inset 6px 0 0 ${pcAccent(d.sheet)}">${esc(d.date)}</td><td>${esc(d.sheet)}</td><td>${esc(d.symbol)}</td>
     <td>${esc(d.tier)}/${esc(d.total_tiers)}T</td>
     <td>${esc(d.balance_qty)}(${esc(d.qty_change)})</td>
     <td>${n0(d.invest)}</td><td>${n2(d.cash)}</td><td>${n2(d.stock_value)}</td><td>${pct(d.balance_return)}</td>
