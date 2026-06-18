@@ -43,7 +43,8 @@
   .fbar select { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:5px 8px; font-size:13px; }
   .fsel { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:4px 8px; font-size:13px; }
   .gain { color:#37d67a; font-weight:700; } .loss { color:#e06c6c; font-weight:700; }
-  #pnl_table td .delx { background:#6b1e1e; color:#fff; padding:2px 7px; font-size:11px; }
+  .delx { background:#6b1e1e; color:#fff; padding:4px 9px; font-size:12px; }
+  #pnl_table td .delx { padding:2px 7px; font-size:11px; }
   .pause { background:#E0A106; color:#1a1a1a; }
   .resume { background:#2A2F36; color:#E6E6E6; }
   .runnow { background:#2d7ef7; color:#fff; }
@@ -158,6 +159,8 @@
         <label>시트 필터</label><select id="p_filter_sheet" onchange="drawPnl()"><option value="">전체</option></select>
         <label>Cycle</label><select id="p_filter_cycle" onchange="drawPnl()"><option value="">전체</option></select>
         <span id="pnl_count" class="row"></span>
+        <button class="delx" onclick="delTradesFiltered()">필터한 것 삭제</button>
+        <button class="delx" onclick="delTradesAll()">전체 삭제</button>
       </div>
       <div id="pnl_table"></div>
     </div>
@@ -239,6 +242,18 @@ async function api(path){
   if (!r.ok) throw new Error(r.status+': '+await r.text());
   return r.json();
 }
+// Supabase는 한 요청당 최대 1000행만 반환 → offset으로 끝까지 페이지네이션.
+async function apiAll(pathBase){
+  let all=[], from=0; const page=1000;
+  while(true){
+    const part = await api(`${pathBase}&limit=${page}&offset=${from}`);
+    all = all.concat(part||[]);
+    if(!part || part.length < page) break;
+    from += page;
+    if(from > 200000) break;            // 안전장치
+  }
+  return all;
+}
 
 async function refresh(){
   $('msg').textContent='';
@@ -255,7 +270,7 @@ async function refresh(){
     catch(e){ $('sheets').innerHTML = '<div class="row">시트 테이블 없음 — schema.sql의 sheets 테이블을 Supabase에 추가하세요.</div>'; }
     try { renderSettlements(await api('settlements?select=*&order=date.desc,sheet.asc&limit=300')); }
     catch(e){ $('settlements').innerHTML = '<div class="row">정산 테이블 없음 — schema.sql의 settlements 테이블을 Supabase에 추가하세요.</div>'; }
-    try { renderPnl(await api('trades?select=*&order=date.desc,created_at.desc&limit=3000')); }
+    try { renderPnl(await apiAll('trades?select=*&order=date.desc,created_at.desc')); }
     catch(e){ $('pnl_table').innerHTML = '<div class="row">손익(trades) 테이블 없음 — schema.sql의 trades 테이블을 Supabase에 추가하세요.</div>'; }
   } catch(e){ if(String(e.message)!=='401') $('msg').textContent='오류: '+e.message; }
 }
@@ -702,6 +717,29 @@ async function delTrade(id){
     });
     refresh();
   } catch(e){ $('pnl_msg').textContent = '삭제 오류: '+e; }
+}
+// 일괄 삭제 — 필터(시트/Cycle)에 맞는 거래 전부, 또는 전체.
+async function delByQuery(q){
+  try {
+    const r = await fetch(`${URL_}/rest/v1/${q}`, { method:'DELETE',
+      headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, Prefer:'return=minimal' } });
+    if(!r.ok){ $('pnl_msg').textContent=`삭제 실패 ${r.status}: ${await r.text()}`; return; }
+    $('pnl_msg').textContent='삭제 완료.'; refresh();
+  } catch(e){ $('pnl_msg').textContent='삭제 오류: '+e; }
+}
+async function delTradesFiltered(){
+  const fs=$('p_filter_sheet')?$('p_filter_sheet').value:'';
+  const fc=$('p_filter_cycle')?$('p_filter_cycle').value:'';
+  if(!fs && !fc) return delTradesAll();
+  const parts=[]; if(fs) parts.push('sheet=eq.'+encodeURIComponent(fs)); if(fc) parts.push('cycle=eq.'+encodeURIComponent(fc));
+  const desc=(fs?`시트 '${fs}'`:'')+(fc?` Cycle ${fc}`:'');
+  if(!confirm(`${desc} 의 거래를 모두 삭제할까요? (되돌릴 수 없음)`)) return;
+  await delByQuery('trades?'+parts.join('&'));
+}
+async function delTradesAll(){
+  if(!confirm('손익 탭의 모든 거래를 삭제할까요? (되돌릴 수 없음)')) return;
+  if(!confirm('정말 전체 삭제할까요? 한 번 더 확인합니다.')) return;
+  await delByQuery('trades?id=neq.00000000-0000-0000-0000-000000000000');
 }
 
 // ── 엑셀/CSV 일괄 업로드(구글시트 이전) ─────────────────────────────────────
