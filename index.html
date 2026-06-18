@@ -145,6 +145,15 @@
           <span id="pnl_msg" class="row"></span>
         </div>
       </div>
+      <div class="card" style="margin:10px 0;">
+        <div class="srow" style="flex-wrap:wrap;">
+          <b>📥 엑셀/CSV 한 번에 올리기</b>
+          <label>시트명</label><input id="imp_sheet" size="14" placeholder="비우면 탭/파일명 사용">
+          <input type="file" id="imp_file" accept=".csv,.xlsx,.xls" onchange="importFile(event)">
+          <button class="ghost" onclick="$('imp_file').value='';$('imp_file').click()">파일 선택</button>
+        </div>
+        <div class="row" id="imp_msg">구글시트 → 다운로드 → CSV 또는 Excel(.xlsx). 날짜·Tier·거래구분(매수/매도)·체결단가·수량·수수료·Cycle 열을 자동 인식합니다. (최신→과거 순서를 자동으로 시간순 정렬)</div>
+      </div>
       <div class="fbar">
         <label>시트 필터</label><select id="p_filter_sheet" onchange="drawPnl()"><option value="">전체</option></select>
         <label>Cycle</label><select id="p_filter_cycle" onchange="drawPnl()"><option value="">전체</option></select>
@@ -693,6 +702,117 @@ async function delTrade(id){
     });
     refresh();
   } catch(e){ $('pnl_msg').textContent = '삭제 오류: '+e; }
+}
+
+// ── 엑셀/CSV 일괄 업로드(구글시트 이전) ─────────────────────────────────────
+function impNum(v){ if(v==null) return 0; const n=parseFloat(String(v).replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
+function impDate(v){
+  if(v==null) return '';
+  if(Object.prototype.toString.call(v)==='[object Date]'){
+    return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,'0')}-${String(v.getDate()).padStart(2,'0')}`;
+  }
+  const s=String(v).trim();
+  let m=s.match(/(\d{4})[-.\/]\s*(\d{1,2})[-.\/]\s*(\d{1,2})/);            // YYYY-M-D
+  if(m) return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+  m=s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);                              // M/D/YYYY
+  if(m) return `${m[3]}-${String(m[1]).padStart(2,'0')}-${String(m[2]).padStart(2,'0')}`;
+  return '';
+}
+// 2D 배열에서 거래로그 행 추출 → trades[](과거→최신 순)
+function parseSheetMatrix(matrix, sheetName){
+  let hi=-1;
+  for(let i=0;i<matrix.length;i++){
+    const j=(matrix[i]||[]).map(c=>String(c==null?'':c)).join('|');
+    if(/거래\s*구분/.test(j) && /단가/.test(j)){ hi=i; break; }
+  }
+  if(hi<0) return {error:'표 헤더(거래 구분/체결 단가 …)를 찾지 못했습니다.'};
+  const H=(matrix[hi]||[]).map(c=>String(c==null?'':c).replace(/\s/g,''));
+  const col=(...names)=>H.findIndex(h=> names.some(n=> h.includes(n)));
+  const ci={ date:col('날짜','Date'), tier:col('Tier','티어'), side:col('거래구분','구분'),
+             price:col('체결단가','단가'), qty:col('수량'), fee:col('수수료'),
+             cycle:col('Cycle','사이클'), symbol:col('종목','Symbol') };
+  if(ci.side<0||ci.price<0||ci.date<0) return {error:'필수 열(날짜/거래 구분/체결 단가)을 찾지 못했습니다.'};
+  const rows=[];
+  for(let i=hi+1;i<matrix.length;i++){
+    const r=matrix[i]; if(!r) continue;
+    const sideRaw=String(r[ci.side]==null?'':r[ci.side]);
+    const side=sideRaw.includes('매도')?'sell':sideRaw.includes('매수')?'buy':'';
+    const date=impDate(r[ci.date]);
+    const qty=Math.round(impNum(r[ci.qty])), price=impNum(r[ci.price]);
+    if(!side||!date||!qty||!price) continue;
+    rows.push({ sheet:sheetName, date, tier:Math.round(impNum(r[ci.tier]))||0, side, price, qty,
+      fee: ci.fee>=0?impNum(r[ci.fee]):0, cycle: ci.cycle>=0?(Math.round(impNum(r[ci.cycle]))||1):1,
+      symbol: ci.symbol>=0?(String(r[ci.symbol]==null?'':r[ci.symbol]).trim()||null):null });
+  }
+  rows.reverse();    // 시트 로그=최신→과거 → FIFO 위해 과거→최신으로
+  return {rows};
+}
+// 간단 CSV 파서(따옴표·콤마 포함 셀 처리)
+function parseCsv(text){
+  const rows=[]; let row=[], cell='', q=false;
+  for(let i=0;i<text.length;i++){ const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cell+='"';i++;} else q=false; } else cell+=c; }
+    else if(c==='"') q=true;
+    else if(c===','){ row.push(cell); cell=''; }
+    else if(c==='\n'){ row.push(cell); rows.push(row); row=[]; cell=''; }
+    else if(c!=='\r') cell+=c;
+  }
+  if(cell!==''||row.length){ row.push(cell); rows.push(row); }
+  return rows;
+}
+function lazyXlsx(){
+  return new Promise((res,rej)=>{
+    if(window.XLSX) return res(window.XLSX);
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload=()=>res(window.XLSX); s.onerror=()=>rej(new Error('XLSX 라이브러리 로드 실패 — CSV로 올려주세요.'));
+    document.head.appendChild(s);
+  });
+}
+async function importFile(ev){
+  const f=ev.target.files && ev.target.files[0]; if(!f) return;
+  const nameNoExt=f.name.replace(/\.[^.]+$/,'');
+  const userSheet=$('imp_sheet')?$('imp_sheet').value.trim():'';
+  try {
+    let batches=[];
+    if(/\.csv$/i.test(f.name)){
+      const p=parseSheetMatrix(parseCsv(await f.text()), userSheet||nameNoExt);
+      if(p.error){ $('imp_msg').textContent='인식 실패: '+p.error; return; }
+      batches.push({sheet:userSheet||nameNoExt, rows:p.rows});
+    } else {
+      const XLSX=await lazyXlsx();
+      const wb=XLSX.read(await f.arrayBuffer(),{type:'array',cellDates:true});
+      wb.SheetNames.forEach(sn=>{
+        const m=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:false,defval:''});
+        const sheetName=(wb.SheetNames.length===1 && userSheet)?userSheet:sn;
+        const p=parseSheetMatrix(m, sheetName);
+        if(p.rows && p.rows.length) batches.push({sheet:sheetName, rows:p.rows});
+      });
+      if(!batches.length){ $('imp_msg').textContent='거래행을 찾지 못했습니다(헤더/매수·매도 열 확인).'; return; }
+    }
+    const total=batches.reduce((a,b)=>a+b.rows.length,0);
+    if(!total){ $('imp_msg').textContent='업로드할 거래가 없습니다.'; return; }
+    const names=batches.map(b=>`${b.sheet}(${b.rows.length}건)`).join(', ');
+    if(!confirm(`다음을 업로드할까요?\n${names}\n총 ${total}건`)) return;
+    let done=0;
+    for(const b of batches){ done += await insertTrades(b.rows, done, total); }
+    $('imp_msg').textContent=`완료: ${done}건 업로드.`;
+    if($('imp_file')) $('imp_file').value='';
+    refresh();
+  } catch(e){ $('imp_msg').textContent='업로드 오류: '+(e&&e.message||e); }
+}
+async function insertTrades(rows, baseDone, total){
+  const BASE=Date.parse('2000-01-01T00:00:00Z');   // created_at을 증가시켜 같은 날짜 내 FIFO 순서 보존
+  let done=0;
+  for(let i=0;i<rows.length;i+=400){
+    const chunk=rows.slice(i,i+400).map((r,j)=>({...r, created_at:new Date(BASE+(i+j)*1000).toISOString()}));
+    const r=await fetch(`${URL_}/rest/v1/trades`,{ method:'POST',
+      headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, 'Content-Type':'application/json', Prefer:'return=minimal' },
+      body: JSON.stringify(chunk) });
+    if(!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+    done+=chunk.length; $('imp_msg').textContent=`업로드 중... ${(baseDone||0)+done}/${total||rows.length}`;
+  }
+  return done;
 }
 
 function renderOrders(rows){
