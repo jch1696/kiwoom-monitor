@@ -38,6 +38,9 @@
   .cmds { margin-top:10px; display:flex; gap:6px; flex-wrap:wrap; }
   .cmds button { padding:5px 10px; font-size:12px; }
   .pccolor { width:34px; height:26px; padding:0; border:1px solid #3a3f46; border-radius:6px; background:none; cursor:pointer; }
+  .fbar { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+  .fbar label { color:#9AA0A6; font-size:13px; }
+  .fbar select { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:5px 8px; font-size:13px; }
   .pause { background:#E0A106; color:#1a1a1a; }
   .resume { background:#2A2F36; color:#E6E6E6; }
   .runnow { background:#2d7ef7; color:#fff; }
@@ -107,6 +110,12 @@
 
     <div class="tabpane hidden" data-pane="settle">
       <h2>일일 정산 (매일 지정 시각 자동 기록)</h2>
+      <div class="fbar">
+        <label>시트</label><select id="f_sheet" onchange="drawSettlements()"><option value="">전체</option></select>
+        <label>종목</label><select id="f_symbol" onchange="drawSettlements()"><option value="">전체</option></select>
+        <button class="ghost" onclick="resetSettleFilter()">초기화</button>
+        <span id="settle_count" class="row"></span>
+      </div>
       <div id="settlements"></div>
     </div>
 
@@ -483,14 +492,36 @@ function renderStatus(rows){
   }).join('');
 }
 
+let _settlements = [];
+// 선택값을 유지하며 드롭다운 옵션 채우기
+function fillOptions(sel, values){
+  if(!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">전체</option>' + values.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+  if(values.indexOf(cur) >= 0) sel.value = cur;
+}
 function renderSettlements(rows){
+  _settlements = rows || [];
+  const sheets = [...new Set(_settlements.map(d=>d.sheet).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),'ko'));
+  const syms   = [...new Set(_settlements.map(d=>d.symbol).filter(Boolean))].sort();
+  fillOptions($('f_sheet'), sheets);
+  fillOptions($('f_symbol'), syms);
+  drawSettlements();
+}
+function resetSettleFilter(){ if($('f_sheet'))$('f_sheet').value=''; if($('f_symbol'))$('f_symbol').value=''; drawSettlements(); }
+function drawSettlements(){
   const pct = v => (v==null?'':(Number(v)*100).toFixed(2)+'%');
   const n2  = v => (v==null?'':Number(v).toFixed(2));
   const n0  = v => (v==null?'':Math.round(Number(v)));
+  const fs = $('f_sheet') ? $('f_sheet').value : '';
+  const fy = $('f_symbol') ? $('f_symbol').value : '';
+  // 필터 적용. 단일 종목/시트로 좁히면 흐름을 보기 쉽게 날짜 오름차순(과거→최신).
+  let rows = _settlements.filter(d => (!fs || d.sheet===fs) && (!fy || d.symbol===fy));
+  if(fs || fy) rows = rows.slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
   const head = `<table><tr><th>날짜</th><th>시트</th><th>종목</th><th>티어</th><th>잔고(차)</th>
     <th>투자금</th><th>예수금</th><th>주식평가금</th><th>잔고수익</th>
     <th>매수예정</th><th>인출가능</th><th>아바타수익</th><th>매수</th><th>매도</th></tr>`;
-  const body = (rows||[]).map(d => { const k = d.agent_id || d.sheet; return `<tr style="background:${pcBg(k)}">
+  const body = rows.map(d => { const k = d.agent_id || d.sheet; return `<tr style="background:${pcBg(k)}">
     <td style="box-shadow:inset 6px 0 0 ${pcAccent(k)}">${esc(d.date)}</td><td>${esc(d.sheet)}</td><td>${esc(d.symbol)}</td>
     <td>${esc(d.tier)}/${esc(d.total_tiers)}T</td>
     <td>${esc(d.balance_qty)}(${esc(d.qty_change)})</td>
@@ -498,6 +529,7 @@ function renderSettlements(rows){
     <td>${n0(d.planned_buy)}</td><td>${n0(d.withdrawable)}</td><td>${pct(d.avatar_return)}</td>
     <td>${esc(d.buys)}</td><td>${esc(d.sells)}</td>
   </tr>`; }).join('');
+  if($('settle_count')) $('settle_count').textContent = `${rows.length}건${(fs||fy)?' (필터)':''}`;
   $('settlements').innerHTML = head + (body || '<tr><td colspan="14" class="row">정산 없음 — 봇이 지정 시각에 자동 기록합니다.</td></tr>') + '</table>';
 }
 
