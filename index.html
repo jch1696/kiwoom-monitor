@@ -127,6 +127,7 @@
     <div class="tabpane hidden" data-pane="pnl">
       <h2>실현 손익 (실제 체결 입력 — Tier·Cycle 매칭, HTS 손익 아님)</h2>
       <div id="pnl_summary" class="grid"></div>
+      <div id="pnl_monthly"></div>
       <div class="card" style="margin:10px 0;">
         <div class="srow" style="flex-wrap:wrap;">
           <label>시트</label><input id="p_sheet" list="p_sheets" size="14" placeholder="예: SOXL_창호">
@@ -603,7 +604,10 @@ function computeTradeProfits(trades){
     const d = String(a.date).localeCompare(String(b.date));
     return d || String(a.created_at||'').localeCompare(String(b.created_at||''));
   });
-  const profit = {};               // trade.id → 실현손익(매도만)
+  const profit = {};               // 매도 trade.id → 실현손익
+  const cost = {};                 // 매도 trade.id → 매칭된 매입금액(원가)
+  const proceeds = {};             // 매도 trade.id → 매도금액(순액)
+  const unmatched = {};            // 매도 trade.id → 매칭 안 된 수량
   const lots = {};                 // 'sheet|tier|cycle' → [{qty, unit}]
   const keyf = t => `${t.sheet}|${t.tier}|${t.cycle}`;
   for(const t of sorted){
@@ -613,17 +617,19 @@ function computeTradeProfits(trades){
       lots[k].push({ qty:q, unit: q? (price*q+fee)/q : price });   // 주당 매수원가(수수료 포함)
     } else {
       const sellUnit = q? (price*q-fee)/q : price;                 // 주당 매도순액(수수료 차감)
-      let remain=q, cost=0, matched=0;
+      let remain=q, cst=0, matched=0;
       while(remain>0 && lots[k].length){
         const lot=lots[k][0]; const take=Math.min(remain, lot.qty);
-        cost += take*lot.unit; matched += take; lot.qty -= take; remain -= take;
+        cst += take*lot.unit; matched += take; lot.qty -= take; remain -= take;
         if(lot.qty<=0) lots[k].shift();
       }
-      profit[t.id] = sellUnit*matched - cost;        // 매칭분 실현손익(매칭 안 된 수량은 제외)
-      if(matched < q) profit['_um_'+t.id] = q-matched;
+      proceeds[t.id] = sellUnit*matched;
+      cost[t.id] = cst;
+      profit[t.id] = sellUnit*matched - cst;         // 매칭분 실현손익(매칭 안 된 수량은 제외)
+      if(matched < q) unmatched[t.id] = q-matched;
     }
   }
-  return profit;
+  return { profit, cost, proceeds, unmatched };
 }
 function renderPnl(rows){
   _trades = rows || [];
@@ -645,7 +651,9 @@ function drawPnl(){
   const n2=v=>(v==null?'':Number(v).toFixed(2));
   const fs = $('p_filter_sheet')?$('p_filter_sheet').value:'';
   const fc = $('p_filter_cycle')?$('p_filter_cycle').value:'';
-  const profit = computeTradeProfits(_trades);
+  const R = computeTradeProfits(_trades);
+  const profit = R.profit;
+  renderMonthly(R);                    // 월별(시트별+전체) 수익 합계
   // ── 시트별 요약(전체 거래 기준, 필터 무관) ──
   const bySheet = {};
   _trades.forEach(t=>{ (bySheet[t.sheet]=bySheet[t.sheet]||[]).push(t); });
@@ -672,7 +680,7 @@ function drawPnl(){
     const k = pcKeyForSheetName(t.sheet);
     const isSell = t.side==='sell';
     const pf = isSell ? (profit[t.id]||0) : null;
-    const um = profit['_um_'+t.id];
+    const um = R.unmatched[t.id];
     return `<tr style="background:${pcBg(k)}">
       <td style="box-shadow:inset 6px 0 0 ${pcAccent(k)}">${esc(t.date)}</td>
       <td>${esc(t.sheet)}</td><td>${esc(t.tier)}</td>
@@ -685,6 +693,42 @@ function drawPnl(){
   }).join('');
   if($('pnl_count')) $('pnl_count').textContent = `${rows.length}건${(fs||fc)?' (필터)':''}`;
   $('pnl_table').innerHTML = head + (body || '<tr><td colspan="11" class="row">거래 없음</td></tr>') + '</table>';
+}
+// 월별(YYYY-MM) × 시트 수익금 매트릭스 + 전체(월합/수익률) + 합계 행. 필터 무관(전체 데이터).
+function renderMonthly(R){
+  const box=$('pnl_monthly'); if(!box) return;
+  const n2=v=>Number(v||0).toFixed(2);
+  const sheets=[...new Set(_trades.filter(t=>t.side==='sell').map(t=>t.sheet).filter(Boolean))]
+                 .sort((a,b)=>String(a).localeCompare(String(b),'ko'));
+  const M={};                                  // 'YYYY-MM' → {bySheet:{sheet:profit}, p, buy}
+  _trades.forEach(t=>{
+    if(t.side!=='sell') return;
+    const mo=(t.date||'').slice(0,7); if(!mo) return;
+    const p=R.profit[t.id]||0, c=R.cost[t.id]||0;
+    const m=M[mo]=M[mo]||{bySheet:{}, p:0, buy:0};
+    m.bySheet[t.sheet]=(m.bySheet[t.sheet]||0)+p; m.p+=p; m.buy+=c;
+  });
+  const months=Object.keys(M).sort().reverse();
+  if(!months.length){ box.innerHTML=''; return; }
+  const gc=v=>`<b class="${v>=0?'gain':'loss'}">$${n2(v)}</b>`;
+  const colTot={}; let grandP=0, grandBuy=0;
+  sheets.forEach(s=>colTot[s]=0);
+  const head=`<table><tr><th>월</th>`
+    + sheets.map(s=>`<th style="border-bottom:3px solid ${pcAccent(pcKeyForSheetName(s))}">${esc(s)}</th>`).join('')
+    + `<th>전체</th><th>수익률</th></tr>`;
+  const body=months.map(mo=>{
+    const m=M[mo]; grandP+=m.p; grandBuy+=m.buy;
+    const cells=sheets.map(s=>{ const v=m.bySheet[s]; if(v!=null) colTot[s]+=v; return `<td>${v!=null?gc(v):'-'}</td>`; }).join('');
+    const ret=m.buy? (m.p/m.buy*100):null;
+    return `<tr><td>${esc(mo)}</td>${cells}<td>${gc(m.p)}</td>`
+      + `<td>${ret==null?'-':('<b class="'+(ret>=0?'gain':'loss')+'">'+ret.toFixed(2)+'%</b>')}</td></tr>`;
+  }).join('');
+  const gret=grandBuy? (grandP/grandBuy*100):null;
+  const foot=`<tr style="border-top:2px solid #3a3f46;font-weight:700;"><td>합계</td>`
+    + sheets.map(s=>`<td>${gc(colTot[s])}</td>`).join('')
+    + `<td>${gc(grandP)}</td><td>${gret==null?'-':('<b class="'+(gret>=0?'gain':'loss')+'">'+gret.toFixed(2)+'%</b>')}</td></tr>`;
+  box.innerHTML=`<h3 style="margin:14px 0 6px;color:#cfd3da;font-size:15px;">📅 월별 수익 합계 (시트별 + 전체)</h3>`
+    + head + body + foot + '</table>';
 }
 async function addTrade(){
   const v = id => { const e=$(id); return e?e.value.trim():''; };
