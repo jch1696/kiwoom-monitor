@@ -41,6 +41,9 @@
   .fbar { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
   .fbar label { color:#9AA0A6; font-size:13px; }
   .fbar select { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:5px 8px; font-size:13px; }
+  .fsel { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:4px 8px; font-size:13px; }
+  .gain { color:#37d67a; font-weight:700; } .loss { color:#e06c6c; font-weight:700; }
+  #pnl_table td .delx { background:#6b1e1e; color:#fff; padding:2px 7px; font-size:11px; }
   .pause { background:#E0A106; color:#1a1a1a; }
   .resume { background:#2A2F36; color:#E6E6E6; }
   .runnow { background:#2d7ef7; color:#fff; }
@@ -93,6 +96,7 @@
       <button class="tab active" data-tab="monitor" onclick="showTab('monitor')">📊 모니터</button>
       <button class="tab" data-tab="sheets" onclick="showTab('sheets')">⚙ 시트 설정</button>
       <button class="tab" data-tab="settle" onclick="showTab('settle')">🧾 정산</button>
+      <button class="tab" data-tab="pnl" onclick="showTab('pnl')">💰 손익</button>
       <button class="tab" data-tab="logs" onclick="showTab('logs')">📜 기록</button>
     </div>
 
@@ -117,6 +121,36 @@
         <span id="settle_count" class="row"></span>
       </div>
       <div id="settlements"></div>
+    </div>
+
+    <div class="tabpane hidden" data-pane="pnl">
+      <h2>실현 손익 (실제 체결 입력 — Tier·Cycle 매칭, HTS 손익 아님)</h2>
+      <div id="pnl_summary" class="grid"></div>
+      <div class="card" style="margin:10px 0;">
+        <div class="srow" style="flex-wrap:wrap;">
+          <label>시트</label><input id="p_sheet" list="p_sheets" size="14" placeholder="예: SOXL_창호">
+          <datalist id="p_sheets"></datalist>
+          <label>종목</label><input id="p_symbol" size="7" placeholder="SOXL">
+          <label>날짜</label><input id="p_date" type="date">
+          <label>Tier</label><input id="p_tier" size="4">
+          <label>Cycle</label><input id="p_cycle" size="4" value="1">
+        </div>
+        <div class="srow" style="flex-wrap:wrap;">
+          <label>구분</label>
+          <select id="p_side" class="fsel"><option value="buy">매수</option><option value="sell">매도</option></select>
+          <label>체결단가</label><input id="p_price" size="8">
+          <label>수량</label><input id="p_qty" size="6">
+          <label>수수료</label><input id="p_fee" size="6" value="0">
+          <button onclick="addTrade()">추가</button>
+          <span id="pnl_msg" class="row"></span>
+        </div>
+      </div>
+      <div class="fbar">
+        <label>시트 필터</label><select id="p_filter_sheet" onchange="drawPnl()"><option value="">전체</option></select>
+        <label>Cycle</label><select id="p_filter_cycle" onchange="drawPnl()"><option value="">전체</option></select>
+        <span id="pnl_count" class="row"></span>
+      </div>
+      <div id="pnl_table"></div>
     </div>
 
     <div class="tabpane hidden" data-pane="logs">
@@ -212,6 +246,8 @@ async function refresh(){
     catch(e){ $('sheets').innerHTML = '<div class="row">시트 테이블 없음 — schema.sql의 sheets 테이블을 Supabase에 추가하세요.</div>'; }
     try { renderSettlements(await api('settlements?select=*&order=date.desc,sheet.asc&limit=300')); }
     catch(e){ $('settlements').innerHTML = '<div class="row">정산 테이블 없음 — schema.sql의 settlements 테이블을 Supabase에 추가하세요.</div>'; }
+    try { renderPnl(await api('trades?select=*&order=date.desc,created_at.desc&limit=3000')); }
+    catch(e){ $('pnl_table').innerHTML = '<div class="row">손익(trades) 테이블 없음 — schema.sql의 trades 테이블을 Supabase에 추가하세요.</div>'; }
   } catch(e){ if(String(e.message)!=='401') $('msg').textContent='오류: '+e.message; }
 }
 
@@ -531,6 +567,132 @@ function drawSettlements(){
   </tr>`; }).join('');
   if($('settle_count')) $('settle_count').textContent = `${rows.length}건${(fs||fy)?' (필터)':''}`;
   $('settlements').innerHTML = head + (body || '<tr><td colspan="14" class="row">정산 없음 — 봇이 지정 시각에 자동 기록합니다.</td></tr>') + '</table>';
+}
+
+// ── 실현 손익 (수동 입력 거래 → Tier·Cycle FIFO 매칭) ───────────────────────
+let _trades = [];
+// 거래금액(net): 매수=가격*수량+수수료(나간 돈), 매도=가격*수량-수수료(들어온 돈)
+function tradeNet(t){ const a=(Number(t.price)||0)*(Number(t.qty)||0); return t.side==='sell' ? a-(Number(t.fee)||0) : a+(Number(t.fee)||0); }
+// 매도마다 같은 (sheet,tier,cycle) 매수와 시간순 FIFO로 매칭 → 매도행별 실현손익.
+function computeTradeProfits(trades){
+  const sorted = trades.slice().sort((a,b)=>{
+    const d = String(a.date).localeCompare(String(b.date));
+    return d || String(a.created_at||'').localeCompare(String(b.created_at||''));
+  });
+  const profit = {};               // trade.id → 실현손익(매도만)
+  const lots = {};                 // 'sheet|tier|cycle' → [{qty, unit}]
+  const keyf = t => `${t.sheet}|${t.tier}|${t.cycle}`;
+  for(const t of sorted){
+    const k = keyf(t); lots[k] = lots[k] || [];
+    const q=Number(t.qty)||0, price=Number(t.price)||0, fee=Number(t.fee)||0;
+    if(t.side==='buy'){
+      lots[k].push({ qty:q, unit: q? (price*q+fee)/q : price });   // 주당 매수원가(수수료 포함)
+    } else {
+      const sellUnit = q? (price*q-fee)/q : price;                 // 주당 매도순액(수수료 차감)
+      let remain=q, cost=0, matched=0;
+      while(remain>0 && lots[k].length){
+        const lot=lots[k][0]; const take=Math.min(remain, lot.qty);
+        cost += take*lot.unit; matched += take; lot.qty -= take; remain -= take;
+        if(lot.qty<=0) lots[k].shift();
+      }
+      profit[t.id] = sellUnit*matched - cost;        // 매칭분 실현손익(매칭 안 된 수량은 제외)
+      if(matched < q) profit['_um_'+t.id] = q-matched;
+    }
+  }
+  return profit;
+}
+function renderPnl(rows){
+  _trades = rows || [];
+  // 시트 옵션 = 거래에 있는 시트 + 시트설정(_sheets)의 시트명
+  const fromTrades = _trades.map(t=>t.sheet).filter(Boolean);
+  const fromSheets = Object.values(_sheets||{}).map(s=>s && s.name).filter(Boolean);
+  const sheets = [...new Set([...fromTrades, ...fromSheets])].sort((a,b)=>String(a).localeCompare(String(b),'ko'));
+  fillOptions($('p_filter_sheet'), sheets);
+  const cycles = [...new Set(_trades.map(t=>String(t.cycle)).filter(v=>v&&v!=='null'))].sort((a,b)=>Number(a)-Number(b));
+  fillOptions($('p_filter_cycle'), cycles);
+  const dl = $('p_sheets'); if(dl) dl.innerHTML = sheets.map(s=>`<option value="${esc(s)}">`).join('');
+  drawPnl();
+}
+function sheetSeed(sheet){                                   // 투입원금 — 시트설정 payload에서
+  const s = Object.values(_sheets||{}).find(x=>x && x.name===sheet);
+  return s && s.payload ? Number(s.payload.seed_amount)||0 : 0;
+}
+function drawPnl(){
+  const n2=v=>(v==null?'':Number(v).toFixed(2));
+  const fs = $('p_filter_sheet')?$('p_filter_sheet').value:'';
+  const fc = $('p_filter_cycle')?$('p_filter_cycle').value:'';
+  const profit = computeTradeProfits(_trades);
+  // ── 시트별 요약(전체 거래 기준, 필터 무관) ──
+  const bySheet = {};
+  _trades.forEach(t=>{ (bySheet[t.sheet]=bySheet[t.sheet]||[]).push(t); });
+  const cards = Object.keys(bySheet).sort((a,b)=>String(a).localeCompare(String(b),'ko')).map(sh=>{
+    const ts = bySheet[sh];
+    const sells = ts.filter(t=>t.side==='sell');
+    const sum = sells.reduce((acc,t)=>acc+(profit[t.id]||0),0);
+    const seed = sheetSeed(sh);
+    const ret = seed? (sum/seed*100):null;
+    const k = pcKeyForSheetName(sh);
+    return `<div class="card" style="background:${pcBg(k)};border-left:6px solid ${pcAccent(k)};">
+      <div class="sym">${esc(sh)}</div>
+      <div class="row">총 매도 ${sells.length}회 · 거래 ${ts.length}건</div>
+      <div class="row">총 수익금 <b class="${sum>=0?'gain':'loss'}">$${n2(sum)}</b></div>
+      <div class="row">투입원금 ${seed?('$'+n2(seed)):'-'} · 누적수익률 ${ret==null?'-':('<b class="'+(ret>=0?'gain':'loss')+'">'+ret.toFixed(2)+'%</b>')}</div>
+    </div>`;
+  }).join('');
+  $('pnl_summary').innerHTML = cards || '<div class="row">입력된 거래 없음 — 아래에서 매수/매도를 추가하세요.</div>';
+  // ── 거래 표(필터 적용, 최신순) ──
+  let rows = _trades.filter(t => (!fs||t.sheet===fs) && (!fc||String(t.cycle)===fc));
+  const head = `<table><tr><th>날짜</th><th>시트</th><th>Tier</th><th>구분</th><th>체결단가</th>
+    <th>수량</th><th>수수료</th><th>거래금액</th><th>Cycle</th><th>수익금</th><th></th></tr>`;
+  const body = rows.map(t=>{
+    const k = pcKeyForSheetName(t.sheet);
+    const isSell = t.side==='sell';
+    const pf = isSell ? (profit[t.id]||0) : null;
+    const um = profit['_um_'+t.id];
+    return `<tr style="background:${pcBg(k)}">
+      <td style="box-shadow:inset 6px 0 0 ${pcAccent(k)}">${esc(t.date)}</td>
+      <td>${esc(t.sheet)}</td><td>${esc(t.tier)}</td>
+      <td>${isSell?'매도':'매수'}</td>
+      <td>$${n2(t.price)}</td><td>${esc(t.qty)}</td><td>$${n2(t.fee)}</td>
+      <td>$${n2(tradeNet(t))}</td><td>${esc(t.cycle)}</td>
+      <td>${isSell?('<b class="'+(pf>=0?'gain':'loss')+'">$'+n2(pf)+'</b>'+(um?` <span class="loss">(미매칭 ${um})</span>`:'')):'-'}</td>
+      <td><button class="delx" onclick="delTrade('${esc(t.id)}')">삭제</button></td>
+    </tr>`;
+  }).join('');
+  if($('pnl_count')) $('pnl_count').textContent = `${rows.length}건${(fs||fc)?' (필터)':''}`;
+  $('pnl_table').innerHTML = head + (body || '<tr><td colspan="11" class="row">거래 없음</td></tr>') + '</table>';
+}
+async function addTrade(){
+  const v = id => { const e=$(id); return e?e.value.trim():''; };
+  const sheet=v('p_sheet'), date=v('p_date'), tier=v('p_tier'), price=v('p_price'), qty=v('p_qty');
+  if(!sheet || !date || tier==='' || price==='' || qty===''){ $('pnl_msg').textContent='시트·날짜·Tier·체결단가·수량은 필수입니다.'; return; }
+  const row = {
+    sheet, symbol: v('p_symbol')||null, date,
+    tier: parseInt(tier)||0, side: ($('p_side')?$('p_side').value:'buy'),
+    price: parseFloat(price)||0, qty: parseInt(qty)||0,
+    fee: parseFloat(v('p_fee'))||0, cycle: parseInt(v('p_cycle'))||1
+  };
+  try {
+    const r = await fetch(`${URL_}/rest/v1/trades`, {
+      method:'POST',
+      headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, 'Content-Type':'application/json', Prefer:'return=minimal' },
+      body: JSON.stringify(row)
+    });
+    if(!r.ok){ $('pnl_msg').textContent = `추가 실패 ${r.status}: ${await r.text()}`; return; }
+    $('pnl_msg').textContent = '추가됨.';
+    ['p_price','p_qty','p_fee'].forEach(id=>{ if($(id)) $(id).value = id==='p_fee'?'0':''; });
+    refresh();
+  } catch(e){ $('pnl_msg').textContent = '추가 오류: '+e; }
+}
+async function delTrade(id){
+  if(!confirm('이 거래를 삭제할까요?')) return;
+  try {
+    await fetch(`${URL_}/rest/v1/trades?id=eq.${encodeURIComponent(id)}`, {
+      method:'DELETE',
+      headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, Prefer:'return=minimal' }
+    });
+    refresh();
+  } catch(e){ $('pnl_msg').textContent = '삭제 오류: '+e; }
 }
 
 function renderOrders(rows){
