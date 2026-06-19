@@ -43,6 +43,7 @@
   .fbar select { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:5px 8px; font-size:13px; }
   .fsel { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:4px 8px; font-size:13px; }
   .gain { color:#37d67a; font-weight:700; } .loss { color:#e06c6c; font-weight:700; }
+  .seedin { width:90px; background:#11151a; color:#E6E6E6; border:1px solid #3a3f46; border-radius:5px; padding:2px 6px; font-size:12px; }
   .delx { background:#6b1e1e; color:#fff; padding:4px 9px; font-size:12px; }
   #pnl_table td .delx { padding:2px 7px; font-size:11px; }
   .pause { background:#E0A106; color:#1a1a1a; }
@@ -179,6 +180,8 @@
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+// 금액: 3자리 콤마 + 소수 2자리 ($4,324.12)
+const fmtUSD = v => Number(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 // Supabase는 UTC로 저장 → 브라우저 현지 시간(KST 등)으로 변환해 표시.
 const _p2 = n => String(n).padStart(2,'0');
 function fmtTime(iso){
@@ -356,6 +359,7 @@ function setPcColor(key, hex){ if(hex) lset('pccol_'+key, hex); else ldel('pccol
 //   시트설정엔 agent_id가 없어 모니터(bot_status)에서 시트명/작업별명→agent_id 매핑을 만든다.
 let _pcKeyBySheet = {};   // 시트명("BITU_유라") → agent_id
 let _pcKeyByNick  = {};   // 작업별명("유라")    → agent_id
+let _priceBySheet = {};   // 시트명 → 현재가(모니터 bot_status에서)
 function pcKeyForSheetName(name){
   if (_pcKeyBySheet[name]) return _pcKeyBySheet[name];
   const s = String(name || ''); const i = s.indexOf('_');
@@ -538,8 +542,8 @@ function renderStatus(rows){
   rows = rows || [];
   if(!rows.length){ $('status').innerHTML = '<div class="row">데이터 없음</div>'; return; }
   // 시트설정 색 매핑용: 시트명/작업별명 → agent_id (시트설정엔 agent_id가 없으므로)
-  _pcKeyBySheet = {}; _pcKeyByNick = {};
-  rows.forEach(d => { if(d.sheet) _pcKeyBySheet[d.sheet] = d.agent_id; if(d.task) _pcKeyByNick[d.task] = d.agent_id; });
+  _pcKeyBySheet = {}; _pcKeyByNick = {}; _priceBySheet = {};
+  rows.forEach(d => { if(d.sheet){ _pcKeyBySheet[d.sheet] = d.agent_id; if(d.price!=null) _priceBySheet[d.sheet] = d.price; } if(d.task) _pcKeyByNick[d.task] = d.agent_id; });
   // PC(agent_id)별로 묶어서 표시. 그룹은 별명순으로 고정 정렬(순서가 안 바뀌도록).
   const groups = {};
   rows.forEach(d => { (groups[d.agent_id||'-'] = groups[d.agent_id||'-'] || []).push(d); });
@@ -643,9 +647,15 @@ function renderPnl(rows){
   const dl = $('p_sheets'); if(dl) dl.innerHTML = sheets.map(s=>`<option value="${esc(s)}">`).join('');
   drawPnl();
 }
-function sheetSeed(sheet){                                   // 투입원금 — 시트설정 payload에서
+function sheetSeed(sheet){                                   // 투입원금 — 시트설정 우선, 없으면 사용자 설정값
   const s = Object.values(_sheets||{}).find(x=>x && x.name===sheet);
-  return s && s.payload ? Number(s.payload.seed_amount)||0 : 0;
+  const cfg = s && s.payload ? Number(s.payload.seed_amount)||0 : 0;
+  return cfg || Number(lget('seed_'+sheet,'0'))||0;
+}
+function setSeed(sheet, val){                                // 카드에서 투입원금 직접 설정(저장)
+  const n = Number(String(val).replace(/[$,\s]/g,''))||0;
+  if(n) lset('seed_'+sheet, String(n)); else ldel('seed_'+sheet);
+  drawPnl();
 }
 function drawPnl(){
   const n2=v=>(v==null?'':Number(v).toFixed(2));
@@ -657,18 +667,27 @@ function drawPnl(){
   // ── 시트별 요약(전체 거래 기준, 필터 무관) ──
   const bySheet = {};
   _trades.forEach(t=>{ (bySheet[t.sheet]=bySheet[t.sheet]||[]).push(t); });
+  const todayMs = Date.now();
+  const pctSpan = v => v==null?'-':('<b class="'+(v>=0?'gain':'loss')+'">'+v.toFixed(2)+'%</b>');
   const cards = Object.keys(bySheet).sort((a,b)=>String(a).localeCompare(String(b),'ko')).map(sh=>{
     const ts = bySheet[sh];
     const sells = ts.filter(t=>t.side==='sell');
     const sum = sells.reduce((acc,t)=>acc+(profit[t.id]||0),0);
     const seed = sheetSeed(sh);
-    const ret = seed? (sum/seed*100):null;
+    const ret = seed? (sum/seed*100):null;                 // 누적수익률
+    const dates = ts.map(t=>t.date).filter(Boolean).sort();
+    const start = dates[0]||'';                            // 시작 날짜 = 최초 거래일
+    const days = start? Math.max(1,(todayMs - Date.parse(start))/86400000) : 0;
+    const annRet = (ret!=null && days)? ret*365/days : null;   // 연 수익률 = 누적 × 365/기간일
+    const price = _priceBySheet[sh];                       // 현재가(모니터에서, 라이브 시트만)
     const k = pcKeyForSheetName(sh);
     return `<div class="card" style="background:${pcBg(k)};border-left:6px solid ${pcAccent(k)};">
       <div class="sym">${esc(sh)}</div>
+      <div class="row">시작 ${start||'-'} · 현재가 ${price!=null?('$'+fmtUSD(price)):'-'}</div>
       <div class="row">총 매도 ${sells.length}회 · 거래 ${ts.length}건</div>
-      <div class="row">총 수익금 <b class="${sum>=0?'gain':'loss'}">$${n2(sum)}</b></div>
-      <div class="row">투입원금 ${seed?('$'+n2(seed)):'-'} · 누적수익률 ${ret==null?'-':('<b class="'+(ret>=0?'gain':'loss')+'">'+ret.toFixed(2)+'%</b>')}</div>
+      <div class="row">총 수익금 <b class="${sum>=0?'gain':'loss'}">$${fmtUSD(sum)}</b></div>
+      <div class="row">투입원금 <input class="seedin" value="${seed||''}" placeholder="설정" onchange="setSeed('${esc(sh).replace(/'/g,'')}',this.value)"></div>
+      <div class="row">누적수익률 ${pctSpan(ret)} · 연수익률 ${pctSpan(annRet)}</div>
     </div>`;
   }).join('');
   $('pnl_summary').innerHTML = cards || '<div class="row">입력된 거래 없음 — 아래에서 매수/매도를 추가하세요.</div>';
@@ -685,9 +704,9 @@ function drawPnl(){
       <td style="box-shadow:inset 6px 0 0 ${pcAccent(k)}">${esc(t.date)}</td>
       <td>${esc(t.sheet)}</td><td>${esc(t.tier)}</td>
       <td>${isSell?'매도':'매수'}</td>
-      <td>$${n2(t.price)}</td><td>${esc(t.qty)}</td><td>$${n2(t.fee)}</td>
-      <td>$${n2(tradeNet(t))}</td><td>${esc(t.cycle)}</td>
-      <td>${isSell?('<b class="'+(pf>=0?'gain':'loss')+'">$'+n2(pf)+'</b>'+(um?` <span class="loss">(미매칭 ${um})</span>`:'')):'-'}</td>
+      <td>$${fmtUSD(t.price)}</td><td>${esc(t.qty)}</td><td>$${fmtUSD(t.fee)}</td>
+      <td>$${fmtUSD(tradeNet(t))}</td><td>${esc(t.cycle)}</td>
+      <td>${isSell?('<b class="'+(pf>=0?'gain':'loss')+'">$'+fmtUSD(pf)+'</b>'+(um?` <span class="loss">(미매칭 ${um})</span>`:'')):'-'}</td>
       <td><button class="delx" onclick="delTrade('${esc(t.id)}')">삭제</button></td>
     </tr>`;
   }).join('');
@@ -710,7 +729,7 @@ function renderMonthly(R){
   });
   const months=Object.keys(M).sort().reverse();
   if(!months.length){ box.innerHTML=''; return; }
-  const gc=v=>`<b class="${v>=0?'gain':'loss'}">$${n2(v)}</b>`;
+  const gc=v=>`<b class="${v>=0?'gain':'loss'}">$${fmtUSD(v)}</b>`;
   const colTot={}; let grandP=0, grandBuy=0;
   sheets.forEach(s=>colTot[s]=0);
   const head=`<table><tr><th>월</th>`
