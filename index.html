@@ -133,25 +133,27 @@
       <h2>실현 손익 (실제 체결 입력 — Tier·Cycle 매칭, HTS 손익 아님)</h2>
       <div id="pnl_order"></div>
       <div id="pnl_summary" class="grid"></div>
-      <div id="pnl_monthly"></div>
+      <button class="ghost" id="btn_monthly" onclick="toggleMonthly()">📅 월별 수익 합계 펼치기 ▾</button>
+      <div id="pnl_monthly" class="hidden"></div>
       <div class="card" style="margin:10px 0;">
         <div class="srow" style="flex-wrap:wrap;">
-          <label>시트</label><input id="p_sheet" list="p_sheets" size="14" placeholder="예: SOXL_창호">
+          <label>시트</label><input id="p_sheet" list="p_sheets" size="14" placeholder="예: SOXL_창호" onchange="autofillTrade();pPersist()">
           <datalist id="p_sheets"></datalist>
-          <label>종목</label><input id="p_symbol" size="7" placeholder="SOXL">
-          <label>날짜</label><input id="p_date" type="date">
-          <label>Tier</label><input id="p_tier" size="4">
-          <label>Cycle</label><input id="p_cycle" size="4" value="1">
+          <label>종목</label><input id="p_symbol" size="7" placeholder="SOXL" onchange="pPersist()">
+          <label>날짜</label><input id="p_date" type="date" onchange="pPersist()">
+          <label>Tier</label><input id="p_tier" size="4" oninput="autofillTrade()" onchange="pPersist()">
+          <label>Cycle</label><input id="p_cycle" size="4" value="1" onchange="pPersist()">
         </div>
         <div class="srow" style="flex-wrap:wrap;">
           <label>구분</label>
-          <select id="p_side" class="fsel"><option value="buy">매수</option><option value="sell">매도</option></select>
+          <select id="p_side" class="fsel" onchange="autofillTrade();pPersist()"><option value="buy">매수</option><option value="sell">매도</option></select>
           <label>체결단가</label><input id="p_price" size="8">
           <label>수량</label><input id="p_qty" size="6">
           <label>수수료</label><input id="p_fee" size="6" value="0">
           <button onclick="addTrade()">추가</button>
           <span id="pnl_msg" class="row"></span>
         </div>
+        <div class="row" id="autofill_hint">구분·Tier를 고르면 시트 설정의 매수가/매도가·수량이 자동 입력됩니다(다르면 직접 수정).</div>
       </div>
       <div class="card" style="margin:10px 0;">
         <div class="srow" style="flex-wrap:wrap;">
@@ -237,7 +239,7 @@ async function login(){
 }
 
 function logout(){ ldel('token'); TOKEN_=''; location.reload(); }
-function showApp(){ $('loginBox').classList.add('hidden'); $('app').classList.remove('hidden'); }
+function showApp(){ $('loginBox').classList.add('hidden'); $('app').classList.remove('hidden'); pRestore(); applyMonthlyState(); }
 function showTab(name){
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab===name));
   document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('hidden', p.dataset.pane!==name));
@@ -466,7 +468,7 @@ let _sheets = {};
 function renderSheets(rows){
   _sheets = {}; _lastSheets = rows||[];
   const ordered = (rows||[]).slice().sort((a,b)=> sheetCmp(a.name, b.name));   // 사용자 지정 순서
-  $('sheets').innerHTML = ordered.map((s,i) => {
+  const html = ordered.map((s,i) => {
     const p = s.payload || {};
     _sheets[i] = { name: s.name, payload: p, version: s.version||1 };
     const key = pcKeyForSheetName(s.name);    // 모니터·정산과 같은 PC별 색
@@ -488,7 +490,10 @@ function renderSheets(rows){
       <div id="lines_${i}" class="hidden lineedit"></div>
     </div>`;
   }).join('') || '<div class="row">원격 시트 없음 — PC 시트 탭에서 \'원격↑\'로 올리세요.</div>';
+  $('sheets').innerHTML = html;
+  if(!_autofilledOnce){ _autofilledOnce = true; autofillTrade(); }   // 시트 로드 후 1회 자동입력
 }
+let _autofilledOnce = false;
 
 // 라인별 비율(시드%/매수%/매도%) 편집기 토글 — 현재 '총라인수'만큼 행 생성.
 function toggleLines(i){
@@ -706,6 +711,70 @@ function setSeed(sheet, val){                                // 카드에서 투
   if(n) lset('seed_'+sheet, String(n)); else ldel('seed_'+sheet);
   drawPnl();
 }
+
+// ── 시트 설정값으로 매수가/매도가/수량 자동 계산(봇 compute_sheet 동일) ──────
+function _round2(x){ return Math.round(Number(x)*100)/100; }
+function lineSettingAt(ls, i){ const idx=Math.min(Math.max(i,1), ls.length)-1; return ls[idx]||{seed_pct:0,buy_pct:0,sell_pct:0}; }
+function computeSheetJS(p){
+  const n=parseInt(p.total_lines)||0, ls=p.line_settings||[];
+  if(n<=0 || !ls.length) return [];
+  const fb=Number(p.first_buy_price)||0, seed=Number(p.seed_amount)||0;
+  const avg={1:_round2(fb)};
+  for(let L=2; L<=n+1; L++) avg[L]=_round2(avg[L-1]*(1+(Number(lineSettingAt(ls,L).buy_pct)||0)/100));
+  const invest={};
+  for(let L=1; L<=n+1; L++) invest[L]=_round2(seed*(Number(lineSettingAt(ls,L).seed_pct)||0)/100);
+  const buyQty={};
+  for(let L=0; L<=n; L++){ const bp=avg[L+1]||0; buyQty[L]= bp>0? Math.round((invest[L+1]||0)/bp):0; }
+  const rows=[]; let cum=0;
+  for(let L=0; L<=n; L++){
+    const s = L>=1 ? lineSettingAt(ls,L) : null;
+    const avgL = L>=1 ? (avg[L]||0) : 0;
+    const sellP = s ? _round2(avgL*(1+(Number(s.sell_pct)||0)/100)) : 0;
+    rows.push({ line:L, avg_price:avgL, buy_price:avg[L+1]||0, buy_qty:buyQty[L],
+      sell_price:sellP, sell_qty: L>=1 ? (buyQty[L-1]||0):0, balance_qty:cum });
+    cum += buyQty[L];
+  }
+  return rows;
+}
+function sheetPayloadByName(name){ const s=Object.values(_sheets||{}).find(x=>x&&x.name===name); return s?s.payload:null; }
+function autofillTrade(){
+  const sheet=$('p_sheet')?$('p_sheet').value.trim():'';
+  const tier=parseInt($('p_tier')?$('p_tier').value:'');
+  const side=$('p_side')?$('p_side').value:'buy';
+  const hint=$('autofill_hint');
+  const setHint=t=>{ if(hint) hint.textContent=t; };
+  const p=sheetPayloadByName(sheet);
+  if(!p){ setHint(sheet?`'${sheet}' 시트 설정이 없어 자동입력 불가 — 직접 입력하세요.`:'구분·Tier를 고르면 자동 입력됩니다(시트 설정이 있을 때).'); return; }
+  if(!(tier>=1)) return;
+  const rows=computeSheetJS(p); const r=rows[tier];
+  if(!r){ setHint(`Tier ${tier}는 범위 밖(총 ${p.total_lines}층).`); return; }
+  const price = side==='sell' ? r.sell_price : r.avg_price;
+  const qty = r.sell_qty;
+  if($('p_price')) $('p_price').value = price? price.toFixed(2):'';
+  if($('p_qty')) $('p_qty').value = qty||'';
+  if($('p_symbol') && !$('p_symbol').value) $('p_symbol').value = p.symbol||'';
+  setHint(`자동입력: ${side==='sell'?'매도가':'매수가'} $${price?price.toFixed(2):'-'} · 수량 ${qty} (다르면 수정)`);
+}
+
+// ── 입력 고정(반복입력 방지) — 시트/종목/날짜/Tier/Cycle/구분을 저장·복원 ──
+const P_STICKY=['p_sheet','p_symbol','p_date','p_tier','p_cycle'];
+function pPersist(){ P_STICKY.forEach(id=>{ const e=$(id); if(e) lset('pnl_'+id, e.value); }); if($('p_side')) lset('pnl_p_side',$('p_side').value); }
+function pRestore(){ P_STICKY.forEach(id=>{ const e=$(id); const v=lget('pnl_'+id,''); if(e&&v) e.value=v; }); const sv=lget('pnl_p_side',''); if($('p_side')&&sv) $('p_side').value=sv; autofillTrade(); }
+
+// ── 월별 수익 합계 접기/펼치기(스크롤 절약) ──
+function toggleMonthly(){
+  const box=$('pnl_monthly'); if(!box) return;
+  box.classList.toggle('hidden');
+  const open=!box.classList.contains('hidden');
+  lset('pnl_monthly_open', open?'1':'0');
+  applyMonthlyBtn(open);
+}
+function applyMonthlyBtn(open){ const b=$('btn_monthly'); if(b) b.textContent = open?'📅 월별 수익 합계 접기 ▴':'📅 월별 수익 합계 펼치기 ▾'; }
+function applyMonthlyState(){
+  const box=$('pnl_monthly'); if(!box) return;
+  const open=lget('pnl_monthly_open','0')==='1';
+  box.classList.toggle('hidden', !open); applyMonthlyBtn(open);
+}
 function drawPnl(){
   const n2=v=>(v==null?'':Number(v).toFixed(2));
   const fs = $('p_filter_sheet')?$('p_filter_sheet').value:'';
@@ -815,8 +884,8 @@ async function addTrade(){
       body: JSON.stringify(row)
     });
     if(!r.ok){ $('pnl_msg').textContent = `추가 실패 ${r.status}: ${await r.text()}`; return; }
-    $('pnl_msg').textContent = '추가됨.';
-    ['p_price','p_qty','p_fee'].forEach(id=>{ if($(id)) $(id).value = id==='p_fee'?'0':''; });
+    $('pnl_msg').textContent = `추가됨 (${sheet} ${date} T${tier} ${row.side==='sell'?'매도':'매수'}).`;
+    pPersist();                  // 시트·종목·날짜·Tier·Cycle·구분 유지(반복입력 방지) — 값 안 지움
     refresh();
   } catch(e){ $('pnl_msg').textContent = '추가 오류: '+e; }
 }
