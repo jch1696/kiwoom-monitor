@@ -44,6 +44,10 @@
   .fsel { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:4px 8px; font-size:13px; }
   .gain { color:#37d67a; font-weight:700; } .loss { color:#e06c6c; font-weight:700; }
   .seedin { width:90px; background:#11151a; color:#E6E6E6; border:1px solid #3a3f46; border-radius:5px; padding:2px 6px; font-size:12px; }
+  .ochips { display:flex; flex-wrap:wrap; margin-top:6px; }
+  .ochip { display:inline-flex; align-items:center; gap:6px; background:#1a1f26; border:1px solid #2A2F36; border-radius:8px; padding:3px 6px; margin:4px 6px 0 0; font-size:13px; }
+  .ochip button { background:#2A2F36; color:#E6E6E6; padding:1px 7px; font-size:12px; border-radius:5px; }
+  .ochip button:disabled { opacity:.35; cursor:default; }
   .delx { background:#6b1e1e; color:#fff; padding:4px 9px; font-size:12px; }
   #pnl_table td .delx { padding:2px 7px; font-size:11px; }
   .pause { background:#E0A106; color:#1a1a1a; }
@@ -127,6 +131,7 @@
 
     <div class="tabpane hidden" data-pane="pnl">
       <h2>실현 손익 (실제 체결 입력 — Tier·Cycle 매칭, HTS 손익 아님)</h2>
+      <div id="pnl_order"></div>
       <div id="pnl_summary" class="grid"></div>
       <div id="pnl_monthly"></div>
       <div class="card" style="margin:10px 0;">
@@ -360,11 +365,52 @@ function setPcColor(key, hex){ if(hex) lset('pccol_'+key, hex); else ldel('pccol
 let _pcKeyBySheet = {};   // 시트명("BITU_유라") → agent_id
 let _pcKeyByNick  = {};   // 작업별명("유라")    → agent_id
 let _priceBySheet = {};   // 시트명 → 현재가(모니터 bot_status에서)
+let _lastStatus = null;   // 마지막 작업상태 rows(순서 변경 시 즉시 재렌더용)
+let _lastSheets = null;   // 마지막 시트설정 rows
 function pcKeyForSheetName(name){
   if (_pcKeyBySheet[name]) return _pcKeyBySheet[name];
   const s = String(name || ''); const i = s.indexOf('_');
   const nick = i >= 0 ? s.slice(i + 1) : s;
   return _pcKeyByNick[nick] || nick;        // 매핑 없으면 별명으로 폴백(색은 나오되 정확 보장은 아님)
+}
+
+// ── 사용자 지정 시트 순서(localStorage) — 손익/시트설정/모니터에 공통 적용 ────
+function sheetOrderList(){ try { return JSON.parse(lget('sheet_order','[]'))||[]; } catch(e){ return []; } }
+function sheetCmp(a,b){                       // 지정 순서 우선, 없으면 한글 가나다순
+  const ord = sheetOrderList();
+  const idx = n => { const i=ord.indexOf(n); return i<0 ? 1e9 : i; };
+  return (idx(a)-idx(b)) || String(a).localeCompare(String(b),'ko');
+}
+function sheetSort(names){ return (names||[]).slice().sort(sheetCmp); }
+function _allSheetNames(){
+  const a = _trades.map(t=>t.sheet).filter(Boolean);
+  const b = Object.values(_sheets||{}).map(s=>s&&s.name).filter(Boolean);
+  const c = Object.keys(_pcKeyBySheet||{});        // 모니터에 보이는 시트명
+  return [...new Set([...a,...b,...c])];
+}
+function moveSheet(name, dir){               // 현재 순서에서 한 칸 이동 → 전체 순서 저장
+  const all = sheetSort(_allSheetNames());
+  const i = all.indexOf(name); if(i<0) return;
+  const j = i+dir; if(j<0||j>=all.length) return;
+  all.splice(i,1); all.splice(j,0,name);
+  lset('sheet_order', JSON.stringify(all));
+  drawPnl();                                 // 손익은 즉시, 나머지 탭은 다음 새로고침(≤10초)에 반영
+  if(typeof _lastStatus!=='undefined' && _lastStatus) renderStatus(_lastStatus);
+  if(typeof _lastSheets!=='undefined' && _lastSheets) renderSheets(_lastSheets);
+}
+function renderOrderEditor(){
+  const box=$('pnl_order'); if(!box) return;
+  const all=sheetSort(_allSheetNames());
+  if(!all.length){ box.innerHTML=''; return; }
+  const chips=all.map((s,i)=>{
+    const k=pcKeyForSheetName(s);
+    return `<span class="ochip" style="border-left:5px solid ${pcAccent(k)}">
+      <button onclick="moveSheet('${esc(s).replace(/'/g,'')}',-1)" ${i===0?'disabled':''}>◀</button>
+      ${esc(s)}
+      <button onclick="moveSheet('${esc(s).replace(/'/g,'')}',1)" ${i===all.length-1?'disabled':''}>▶</button>
+    </span>`;
+  }).join('');
+  box.innerHTML=`<div class="card" style="margin:6px 0;"><b>시트 순서</b> <span class="row">◀▶로 옮기면 손익·월별·시트설정·모니터에 함께 적용</span><div class="ochips">${chips}</div></div>`;
 }
 
 let _agentNames = {};
@@ -418,8 +464,9 @@ async function deleteAgent(agentId, nick){
 // ── 시트 설정 원격 편집 ──────────────────────────────────────
 let _sheets = {};
 function renderSheets(rows){
-  _sheets = {};
-  $('sheets').innerHTML = (rows||[]).map((s,i) => {
+  _sheets = {}; _lastSheets = rows||[];
+  const ordered = (rows||[]).slice().sort((a,b)=> sheetCmp(a.name, b.name));   // 사용자 지정 순서
+  $('sheets').innerHTML = ordered.map((s,i) => {
     const p = s.payload || {};
     _sheets[i] = { name: s.name, payload: p, version: s.version||1 };
     const key = pcKeyForSheetName(s.name);    // 모니터·정산과 같은 PC별 색
@@ -540,6 +587,7 @@ function statusCard(d){
 
 function renderStatus(rows){
   rows = rows || [];
+  _lastStatus = rows;
   if(!rows.length){ $('status').innerHTML = '<div class="row">데이터 없음</div>'; return; }
   // 시트설정 색 매핑용: 시트명/작업별명 → agent_id (시트설정엔 agent_id가 없으므로)
   _pcKeyBySheet = {}; _pcKeyByNick = {}; _priceBySheet = {};
@@ -551,7 +599,8 @@ function renderStatus(rows){
   const order = Object.keys(groups).sort((a,b) => aname(a).localeCompare(aname(b), 'ko'));
   $('status').innerHTML = order.map(aid => {
     const name = _agentNames[aid] || (aid||'').slice(0,8) || 'PC';
-    const cards = groups[aid].map(statusCard).join('');
+    // PC 안의 카드는 사용자 지정 시트 순서로
+    const cards = groups[aid].slice().sort((x,y)=>sheetCmp(x.sheet,y.sheet)).map(statusCard).join('');
     // 배경은 시트(카드)별로 — 그룹 박스는 헤더만(전체 색칠 안 함)
     return `<div class="pcgroup"><div class="pchead">🖥 ${esc(name)}</div><div class="grid">${cards}</div></div>`;
   }).join('');
@@ -663,13 +712,14 @@ function drawPnl(){
   const fc = $('p_filter_cycle')?$('p_filter_cycle').value:'';
   const R = computeTradeProfits(_trades);
   const profit = R.profit;
+  renderOrderEditor();                 // 시트 순서 편집기
   renderMonthly(R);                    // 월별(시트별+전체) 수익 합계
   // ── 시트별 요약(전체 거래 기준, 필터 무관) ──
   const bySheet = {};
   _trades.forEach(t=>{ (bySheet[t.sheet]=bySheet[t.sheet]||[]).push(t); });
   const todayMs = Date.now();
   const pctSpan = v => v==null?'-':('<b class="'+(v>=0?'gain':'loss')+'">'+v.toFixed(2)+'%</b>');
-  const cards = Object.keys(bySheet).sort((a,b)=>String(a).localeCompare(String(b),'ko')).map(sh=>{
+  const cards = sheetSort(Object.keys(bySheet)).map(sh=>{
     const ts = bySheet[sh];
     const sells = ts.filter(t=>t.side==='sell');
     const sum = sells.reduce((acc,t)=>acc+(profit[t.id]||0),0);
@@ -717,8 +767,7 @@ function drawPnl(){
 function renderMonthly(R){
   const box=$('pnl_monthly'); if(!box) return;
   const n2=v=>Number(v||0).toFixed(2);
-  const sheets=[...new Set(_trades.filter(t=>t.side==='sell').map(t=>t.sheet).filter(Boolean))]
-                 .sort((a,b)=>String(a).localeCompare(String(b),'ko'));
+  const sheets=sheetSort([...new Set(_trades.filter(t=>t.side==='sell').map(t=>t.sheet).filter(Boolean))]);
   const M={};                                  // 'YYYY-MM' → {bySheet:{sheet:profit}, p, buy}
   _trades.forEach(t=>{
     if(t.side!=='sell') return;
