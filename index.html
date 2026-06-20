@@ -42,8 +42,11 @@
   .fbar label { color:#9AA0A6; font-size:13px; }
   .fbar select { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:5px 8px; font-size:13px; }
   .fsel { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:4px 8px; font-size:13px; }
-  input.pin-sheet { width:170px; font-size:14px; padding:5px 8px; }
-  input.pin-date { width:160px; font-size:14px; padding:5px 8px; }
+  .pform { display:grid; grid-template-columns:repeat(3, minmax(200px,1fr)); gap:10px 16px; align-items:center; }
+  .fld { display:flex; align-items:center; gap:8px; }
+  .fld label { color:#9AA0A6; font-size:13px; min-width:58px; text-align:right; }
+  .fld input, .fld select { flex:1; min-width:0; background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:6px 9px; font-size:14px; }
+  @media (max-width:680px){ .pform { grid-template-columns:repeat(2, minmax(160px,1fr)); } }
   .autohint { margin-top:10px; font-size:14px; font-weight:600; color:#aeb6c2; background:#1a1f27; border:1px solid #333b46; border-radius:8px; padding:7px 12px; display:inline-block; }
   .autohint.on { color:#8fcfa3; background:#161f1a; border-color:#2f4d39; }
   .gain { color:#37d67a; font-weight:700; } .loss { color:#e06c6c; font-weight:700; }
@@ -140,26 +143,26 @@
       <button class="ghost" id="btn_monthly" onclick="toggleMonthly()">📅 월별 수익 합계 펼치기 ▾</button>
       <div id="pnl_monthly" class="hidden"></div>
       <div class="card" style="margin:10px 0;">
-        <div class="srow" style="flex-wrap:wrap;">
-          <label>시트</label><input id="p_sheet" list="p_sheets" class="pin-sheet" placeholder="예: SOXL_창호" onchange="autofillTrade();pPersist()">
-          <datalist id="p_sheets"></datalist>
-          <label>날짜</label><input id="p_date" type="date" class="pin-date" onchange="pPersist()">
-          <label>Tier</label><input id="p_tier" size="5" oninput="autofillTrade()" onchange="pPersist()">
+        <datalist id="p_sheets"></datalist>
+        <input id="p_fee" type="hidden" value="0">
+        <div class="pform">
+          <div class="fld"><label>시트</label><input id="p_sheet" list="p_sheets" placeholder="예: SOXL_창호" onchange="autofillTrade();pPersist()"></div>
+          <div class="fld"><label>날짜</label><input id="p_date" type="date" onchange="pPersist()"></div>
+          <div class="fld"><label>Tier</label><input id="p_tier" oninput="autofillTrade()" onchange="pPersist()"></div>
+          <div class="fld"><label>구분</label><select id="p_side" onchange="autofillTrade();pPersist()"><option value="buy">매수</option><option value="sell">매도</option></select></div>
+          <div class="fld"><label>체결단가</label><input id="p_price" oninput="recomputeFee()"></div>
+          <div class="fld"><label>수량</label><input id="p_qty" oninput="recomputeFee()"></div>
         </div>
-        <div class="srow" style="flex-wrap:wrap;">
-          <label>구분</label>
-          <select id="p_side" class="fsel" onchange="autofillTrade();pPersist()"><option value="buy">매수</option><option value="sell">매도</option></select>
-          <label>체결단가</label><input id="p_price" size="9" oninput="recomputeFee()">
-          <label>수량</label><input id="p_qty" size="7" oninput="recomputeFee()">
-          <input id="p_fee" type="hidden" value="0">
+        <div class="srow" style="margin-top:10px;">
           <button onclick="addTrade()">추가</button>
           <span id="pnl_msg" class="row"></span>
         </div>
         <div id="autofill_hint" class="autohint">구분·Tier를 고르면 시트 설정의 매수가/매도가·수량이 자동 입력됩니다(다르면 직접 수정).</div>
       </div>
-      <div class="card" style="margin:10px 0;">
+      <button class="ghost" id="btn_import" onclick="toggleImport()" style="margin:4px 0;">📥 엑셀/CSV 가져오기 ▾</button>
+      <div id="import_box" class="card hidden" style="margin:6px 0;">
         <div class="srow" style="flex-wrap:wrap;">
-          <b>📥 엑셀/CSV 한 번에 올리기</b>
+          <b>엑셀/CSV 한 번에 올리기</b>
           <label>시트명</label><input id="imp_sheet" size="14" placeholder="비우면 탭/파일명 사용">
           <input type="file" id="imp_file" accept=".csv,.xlsx,.xls" onchange="importFile(event)">
           <button class="ghost" onclick="$('imp_file').value='';$('imp_file').click()">파일 선택</button>
@@ -779,6 +782,12 @@ function toggleMonthly(){
   applyMonthlyBtn(open);
 }
 function applyMonthlyBtn(open){ const b=$('btn_monthly'); if(b) b.textContent = open?'📅 월별 수익 합계 접기 ▴':'📅 월별 수익 합계 펼치기 ▾'; }
+function toggleImport(){
+  const box=$('import_box'), b=$('btn_import'); if(!box) return;
+  box.classList.toggle('hidden');
+  const open=!box.classList.contains('hidden');
+  if(b) b.textContent = open?'📥 엑셀/CSV 가져오기 ▴':'📥 엑셀/CSV 가져오기 ▾';
+}
 function applyMonthlyState(){
   const box=$('pnl_monthly'); if(!box) return;
   const open=lget('pnl_monthly_open','0')==='1';
