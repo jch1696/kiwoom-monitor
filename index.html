@@ -491,6 +491,10 @@ function renderSheets(rows){
         <label class="chk"><input type="checkbox" id="sh_bl_${i}" ${p.buy_limit?'checked':''}> 매수 제한</label>
         <label class="chk"><input type="checkbox" id="sh_sl_${i}" ${p.sell_limit?'checked':''}> 매도 제한</label>
       </div>
+      <div class="srow chkrow">
+        <label class="chk" title="1티어에서 가격이 매도가 위로 가면 전량 매도하지 않고 1라인가를 현재가로 올려 그리드를 위로 이동(상승 추종).">
+          <input type="checkbox" id="sh_rl_${i}" ${p.refresh_line?'checked':''}> 1라인 자동 상승(매도 대신 1라인가↑)</label>
+      </div>
       <div class="cmds">
         <button class="ghost" onclick="toggleLines(${i})">라인별 비율 편집 ▼</button>
         <button onclick="saveSheet(${i})">저장(원격→PC)</button>
@@ -551,6 +555,7 @@ async function saveSheet(i){
   p.first_buy_price = parseFloat($('sh_fp_'+i).value)||0;
   p.buy_limit = $('sh_bl_'+i).checked;
   p.sell_limit = $('sh_sl_'+i).checked;
+  if($('sh_rl_'+i)) p.refresh_line = $('sh_rl_'+i).checked;
   // 라인별 비율 편집기를 열었으면 그 표에서 line_settings 재구성(안 열었으면 기존 유지)
   const box = $('lines_'+i);
   const ltotal = box ? (parseInt(box.dataset.total)||0) : 0;
