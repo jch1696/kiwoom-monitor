@@ -79,6 +79,7 @@
   table.lntab{ width:auto; font-size:12px; margin-top:6px; }
   table.lntab th,table.lntab td{ padding:2px 5px; text-align:center; white-space:nowrap; border-bottom:1px solid #23272d; }
   table.lntab input{ width:52px; padding:2px 4px; text-align:right; }
+  table.lntab .lc{ color:#8fcfa3; text-align:right; font-variant-numeric:tabular-nums; }
   .tabs{ display:flex; gap:4px; margin:6px 0 14px; border-bottom:1px solid #2A2F36; flex-wrap:wrap; }
   .tab{ background:transparent; color:#9AA0A6; border-radius:8px 8px 0 0; padding:8px 16px; font-weight:700; }
   .tab.active{ background:#1E232A; color:#1DB954; }
@@ -484,9 +485,9 @@ function renderSheets(rows){
       <div class="sym">${esc(s.name)} <span class="row">v${esc(s.version)}</span></div>
       <div class="srow"><label>종목</label><input id="sh_sym_${i}" value="${esc(p.symbol||'')}" size="8"></div>
       <div class="srow"><label>계좌</label><input id="sh_acc_${i}" value="${esc(p.account_no||'')}" size="12"></div>
-      <div class="srow"><label>총투자금</label><input id="sh_seed_${i}" value="${esc(p.seed_amount??0)}" size="10"></div>
-      <div class="srow"><label>총라인수</label><input id="sh_lines_${i}" value="${esc(p.total_lines??0)}" size="5"></div>
-      <div class="srow"><label>1라인가</label><input id="sh_fp_${i}" value="${esc(p.first_buy_price??0)}" size="8"></div>
+      <div class="srow"><label>총투자금</label><input id="sh_seed_${i}" value="${esc(p.seed_amount??0)}" size="10" oninput="recalcLines(${i})"></div>
+      <div class="srow"><label>총라인수</label><input id="sh_lines_${i}" value="${esc(p.total_lines??0)}" size="5" onchange="reopenLines(${i})"></div>
+      <div class="srow"><label>1라인가</label><input id="sh_fp_${i}" value="${esc(p.first_buy_price??0)}" size="8" oninput="recalcLines(${i})"></div>
       <div class="srow chkrow">
         <label class="chk"><input type="checkbox" id="sh_bl_${i}" ${p.buy_limit?'checked':''}> 매수 제한</label>
         <label class="chk"><input type="checkbox" id="sh_sl_${i}" ${p.sell_limit?'checked':''}> 매도 제한</label>
@@ -522,9 +523,16 @@ function toggleLines(i){
   for(let L=1; L<=total; L++){
     const k = L-1;
     rows += `<tr><td>${L}</td>
-      <td><input id="ln_${i}_${L}_s" value="${esc(at(k,'seed_pct',2))}"></td>
-      <td><input id="ln_${i}_${L}_b" value="${esc(at(k,'buy_pct', L>1?-3:0))}"></td>
-      <td><input id="ln_${i}_${L}_x" value="${esc(at(k,'sell_pct',5))}"></td></tr>`;
+      <td><input id="ln_${i}_${L}_s" value="${esc(at(k,'seed_pct',2))}" oninput="recalcLines(${i})"></td>
+      <td><input id="ln_${i}_${L}_b" value="${esc(at(k,'buy_pct', L>1?-3:0))}" oninput="recalcLines(${i})"></td>
+      <td><input id="ln_${i}_${L}_x" value="${esc(at(k,'sell_pct',5))}" oninput="recalcLines(${i})"></td>
+      <td class="lc" id="lc_${i}_${L}_bal">-</td>
+      <td class="lc" id="lc_${i}_${L}_inv">-</td>
+      <td class="lc" id="lc_${i}_${L}_avg">-</td>
+      <td class="lc" id="lc_${i}_${L}_bp">-</td>
+      <td class="lc" id="lc_${i}_${L}_bq">-</td>
+      <td class="lc" id="lc_${i}_${L}_sp">-</td>
+      <td class="lc" id="lc_${i}_${L}_sq">-</td></tr>`;
   }
   box.dataset.total = total;
   box.innerHTML = `
@@ -532,8 +540,55 @@ function toggleLines(i){
       시드<input id="bf_s_${i}" value="2"> 매수<input id="bf_b_${i}" value="-3"> 매도<input id="bf_x_${i}" value="5">
       <button class="ghost" onclick="bulkFill(${i})">전 라인 적용</button>
     </div>
-    <table class="lntab"><tr><th>라인</th><th>시드%</th><th>매수%</th><th>매도%</th></tr>${rows}</table>`;
+    <div class="row" style="margin:4px 0;color:#8fcfa3;">초록=자동계산: 이 층에서 매수가에 매수량만큼 사서 잔고량이 됨(설정·총투자금·1라인가 바꾸면 즉시 갱신)</div>
+    <table class="lntab"><tr><th>라인</th><th>시드%</th><th>매수%</th><th>매도%</th>
+      <th>잔고량</th><th>투자금</th><th>평단</th><th>매수가</th><th>매수량</th><th>매도가</th><th>매도량</th></tr>${rows}</table>`;
   box.classList.remove('hidden');
+  recalcLines(i);                              // 계산 컬럼 채우기
+}
+
+// 편집 중인 값으로 층별 계산 컬럼(잔고량·매수가·매수량·매도가·매도량…) 실시간 갱신.
+function recalcLines(i){
+  const box = $('lines_'+i); if(!box || box.classList.contains('hidden')) return;
+  const total = parseInt(box.dataset.total)||0;
+  const ls = [];
+  for(let L=1; L<=total; L++){
+    ls.push({ line:L,
+      seed_pct: parseFloat($('ln_'+i+'_'+L+'_s').value)||0,
+      buy_pct:  parseFloat($('ln_'+i+'_'+L+'_b').value)||0,
+      sell_pct: parseFloat($('ln_'+i+'_'+L+'_x').value)||0 });
+  }
+  const p = {
+    seed_amount: parseFloat($('sh_seed_'+i).value)||0,
+    total_lines: total,
+    first_buy_price: parseFloat($('sh_fp_'+i).value)||0,
+    line_settings: ls,
+  };
+  const comp = computeSheetJS(p);              // 봇 compute_sheet와 동일
+  for(let L=1; L<=total; L++){
+    const r = comp[L]; if(!r) continue;
+    const set=(suf,v)=>{ const e=$('lc_'+i+'_'+L+'_'+suf); if(e) e.textContent=v; };
+    set('bal', r.balance_qty);
+    set('inv', Math.round(r.invest).toLocaleString());
+    set('avg', r.avg_price.toFixed(2));
+    set('bp',  r.buy_price.toFixed(2));
+    set('bq',  r.buy_qty);
+    set('sp',  r.sell_price.toFixed(2));
+    set('sq',  r.sell_qty);
+  }
+}
+
+// 총라인수가 바뀌면 편집기 행을 다시 생성(현재 편집값은 보존).
+function reopenLines(i){
+  const box=$('lines_'+i); if(!box || box.classList.contains('hidden')) return;
+  const total=parseInt(box.dataset.total)||0;
+  const ls=[];
+  for(let L=1; L<=total; L++) ls.push({ line:L,
+    seed_pct: parseFloat($('ln_'+i+'_'+L+'_s').value)||0,
+    buy_pct:  parseFloat($('ln_'+i+'_'+L+'_b').value)||0,
+    sell_pct: parseFloat($('ln_'+i+'_'+L+'_x').value)||0 });
+  if(_sheets[i]) _sheets[i].payload = Object.assign({}, _sheets[i].payload, {line_settings: ls});
+  box.classList.add('hidden'); toggleLines(i);
 }
 
 function bulkFill(i){
@@ -542,6 +597,7 @@ function bulkFill(i){
   for(let L=1; L<=total; L++){
     $('ln_'+i+'_'+L+'_s').value=s; $('ln_'+i+'_'+L+'_b').value=b; $('ln_'+i+'_'+L+'_x').value=x;
   }
+  recalcLines(i);
 }
 
 async function saveSheet(i){
@@ -742,7 +798,8 @@ function computeSheetJS(p){
     const avgL = L>=1 ? (avg[L]||0) : 0;
     const sellP = s ? _round2(avgL*(1+(Number(s.sell_pct)||0)/100)) : 0;
     rows.push({ line:L, avg_price:avgL, buy_price:avg[L+1]||0, buy_qty:buyQty[L],
-      sell_price:sellP, sell_qty: L>=1 ? (buyQty[L-1]||0):0, balance_qty:cum });
+      sell_price:sellP, sell_qty: L>=1 ? (buyQty[L-1]||0):0, balance_qty:cum,
+      invest: L>=1 ? (invest[L]||0) : 0 });
     cum += buyQty[L];
   }
   return rows;
