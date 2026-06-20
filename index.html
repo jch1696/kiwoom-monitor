@@ -67,6 +67,9 @@
   .st-failed,.st-expired,.st-cancelled{color:#e06c6c;}
   .srow{ display:flex; gap:6px; align-items:center; margin:4px 0; font-size:13px; }
   .srow label{ color:#9AA0A6; min-width:62px; }
+  .chkrow{ gap:18px; margin-top:8px; }
+  .chk{ min-width:auto !important; display:inline-flex; align-items:center; gap:6px; color:#d3d8df; font-size:13px; cursor:pointer; }
+  .chk input{ width:16px; height:16px; cursor:pointer; }
   .srow input[type=text],.srow input:not([type]){ flex:0 0 auto; }
   #sheets .card button{ background:#2d7ef7; color:#fff; }
   #sheets .card button.ghost{ background:#2A2F36; }
@@ -484,9 +487,9 @@ function renderSheets(rows){
       <div class="srow"><label>총투자금</label><input id="sh_seed_${i}" value="${esc(p.seed_amount??0)}" size="10"></div>
       <div class="srow"><label>총라인수</label><input id="sh_lines_${i}" value="${esc(p.total_lines??0)}" size="5"></div>
       <div class="srow"><label>1라인가</label><input id="sh_fp_${i}" value="${esc(p.first_buy_price??0)}" size="8"></div>
-      <div class="srow">
-        <label><input type="checkbox" id="sh_bl_${i}" ${p.buy_limit?'checked':''}> 매수제한</label>
-        <label><input type="checkbox" id="sh_sl_${i}" ${p.sell_limit?'checked':''}> 매도제한</label>
+      <div class="srow chkrow">
+        <label class="chk"><input type="checkbox" id="sh_bl_${i}" ${p.buy_limit?'checked':''}> 매수 제한</label>
+        <label class="chk"><input type="checkbox" id="sh_sl_${i}" ${p.sell_limit?'checked':''}> 매도 제한</label>
       </div>
       <div class="cmds">
         <button class="ghost" onclick="toggleLines(${i})">라인별 비율 편집 ▼</button>
