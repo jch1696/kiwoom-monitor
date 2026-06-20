@@ -42,6 +42,10 @@
   .fbar label { color:#9AA0A6; font-size:13px; }
   .fbar select { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:5px 8px; font-size:13px; }
   .fsel { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:4px 8px; font-size:13px; }
+  input.pin-sheet { width:170px; font-size:14px; padding:5px 8px; }
+  input.pin-date { width:160px; font-size:14px; padding:5px 8px; }
+  .autohint { margin-top:10px; font-size:16px; font-weight:800; color:#ffd23f; background:#2a2410; border:1px solid #6b5a10; border-radius:8px; padding:8px 12px; display:inline-block; }
+  .autohint.on { color:#7fe7ff; background:#0e2630; border-color:#1c5566; }
   .gain { color:#37d67a; font-weight:700; } .loss { color:#e06c6c; font-weight:700; }
   .seedin { width:90px; background:#11151a; color:#E6E6E6; border:1px solid #3a3f46; border-radius:5px; padding:2px 6px; font-size:12px; }
   .ochips { display:flex; flex-wrap:wrap; margin-top:6px; }
@@ -137,23 +141,21 @@
       <div id="pnl_monthly" class="hidden"></div>
       <div class="card" style="margin:10px 0;">
         <div class="srow" style="flex-wrap:wrap;">
-          <label>시트</label><input id="p_sheet" list="p_sheets" size="14" placeholder="예: SOXL_창호" onchange="autofillTrade();pPersist()">
+          <label>시트</label><input id="p_sheet" list="p_sheets" class="pin-sheet" placeholder="예: SOXL_창호" onchange="autofillTrade();pPersist()">
           <datalist id="p_sheets"></datalist>
-          <label>종목</label><input id="p_symbol" size="7" placeholder="SOXL" onchange="pPersist()">
-          <label>날짜</label><input id="p_date" type="date" onchange="pPersist()">
-          <label>Tier</label><input id="p_tier" size="4" oninput="autofillTrade()" onchange="pPersist()">
-          <label>Cycle</label><input id="p_cycle" size="4" value="1" onchange="pPersist()">
+          <label>날짜</label><input id="p_date" type="date" class="pin-date" onchange="pPersist()">
+          <label>Tier</label><input id="p_tier" size="5" oninput="autofillTrade()" onchange="pPersist()">
         </div>
         <div class="srow" style="flex-wrap:wrap;">
           <label>구분</label>
           <select id="p_side" class="fsel" onchange="autofillTrade();pPersist()"><option value="buy">매수</option><option value="sell">매도</option></select>
-          <label>체결단가</label><input id="p_price" size="8">
-          <label>수량</label><input id="p_qty" size="6">
-          <label>수수료</label><input id="p_fee" size="6" value="0">
+          <label>체결단가</label><input id="p_price" size="9" oninput="recomputeFee()">
+          <label>수량</label><input id="p_qty" size="7" oninput="recomputeFee()">
+          <label>수수료(0.07%)</label><input id="p_fee" size="9" value="0">
           <button onclick="addTrade()">추가</button>
           <span id="pnl_msg" class="row"></span>
         </div>
-        <div class="row" id="autofill_hint">구분·Tier를 고르면 시트 설정의 매수가/매도가·수량이 자동 입력됩니다(다르면 직접 수정).</div>
+        <div id="autofill_hint" class="autohint">구분·Tier를 고르면 시트 설정의 매수가/매도가·수량이 자동 입력됩니다(다르면 직접 수정).</div>
       </div>
       <div class="card" style="margin:10px 0;">
         <div class="srow" style="flex-wrap:wrap;">
@@ -737,27 +739,34 @@ function computeSheetJS(p){
   return rows;
 }
 function sheetPayloadByName(name){ const s=Object.values(_sheets||{}).find(x=>x&&x.name===name); return s?s.payload:null; }
+// 계좌 수수료 0.07% = 체결단가 × 수량 × 0.0007
+const FEE_RATE = 0.0007;
+function recomputeFee(){
+  const price=parseFloat($('p_price')?$('p_price').value:'')||0;
+  const qty=parseInt($('p_qty')?$('p_qty').value:'')||0;
+  if($('p_fee')) $('p_fee').value = (price*qty*FEE_RATE).toFixed(2);
+}
 function autofillTrade(){
   const sheet=$('p_sheet')?$('p_sheet').value.trim():'';
   const tier=parseInt($('p_tier')?$('p_tier').value:'');
   const side=$('p_side')?$('p_side').value:'buy';
   const hint=$('autofill_hint');
-  const setHint=t=>{ if(hint) hint.textContent=t; };
+  const setHint=(t,on)=>{ if(hint){ hint.textContent=t; hint.classList.toggle('on', !!on); } };
   const p=sheetPayloadByName(sheet);
-  if(!p){ setHint(sheet?`'${sheet}' 시트 설정이 없어 자동입력 불가 — 직접 입력하세요.`:'구분·Tier를 고르면 자동 입력됩니다(시트 설정이 있을 때).'); return; }
+  if(!p){ setHint(sheet?`'${sheet}' 시트 설정이 없어 자동입력 불가 — 직접 입력하세요.`:'구분·Tier를 고르면 자동 입력됩니다(시트 설정이 있을 때).', false); return; }
   if(!(tier>=1)) return;
   const rows=computeSheetJS(p); const r=rows[tier];
-  if(!r){ setHint(`Tier ${tier}는 범위 밖(총 ${p.total_lines}층).`); return; }
+  if(!r){ setHint(`Tier ${tier}는 범위 밖(총 ${p.total_lines}층).`, false); return; }
   const price = side==='sell' ? r.sell_price : r.avg_price;
   const qty = r.sell_qty;
   if($('p_price')) $('p_price').value = price? price.toFixed(2):'';
   if($('p_qty')) $('p_qty').value = qty||'';
-  if($('p_symbol') && !$('p_symbol').value) $('p_symbol').value = p.symbol||'';
-  setHint(`자동입력: ${side==='sell'?'매도가':'매수가'} $${price?price.toFixed(2):'-'} · 수량 ${qty} (다르면 수정)`);
+  recomputeFee();                                  // 수수료 0.07% 자동
+  setHint(`✔ ${side==='sell'?'매도가':'매수가'} $${price?price.toFixed(2):'-'} · 수량 ${qty} · 수수료 $${$('p_fee')?$('p_fee').value:'0'} 자동입력 (다르면 수정)`, true);
 }
 
-// ── 입력 고정(반복입력 방지) — 시트/종목/날짜/Tier/Cycle/구분을 저장·복원 ──
-const P_STICKY=['p_sheet','p_symbol','p_date','p_tier','p_cycle'];
+// ── 입력 고정(반복입력 방지) — 시트/날짜/Tier/구분을 저장·복원 ──
+const P_STICKY=['p_sheet','p_date','p_tier'];
 function pPersist(){ P_STICKY.forEach(id=>{ const e=$(id); if(e) lset('pnl_'+id, e.value); }); if($('p_side')) lset('pnl_p_side',$('p_side').value); }
 function pRestore(){ P_STICKY.forEach(id=>{ const e=$(id); const v=lget('pnl_'+id,''); if(e&&v) e.value=v; }); const sv=lget('pnl_p_side',''); if($('p_side')&&sv) $('p_side').value=sv; autofillTrade(); }
 
@@ -871,11 +880,12 @@ async function addTrade(){
   const v = id => { const e=$(id); return e?e.value.trim():''; };
   const sheet=v('p_sheet'), date=v('p_date'), tier=v('p_tier'), price=v('p_price'), qty=v('p_qty');
   if(!sheet || !date || tier==='' || price==='' || qty===''){ $('pnl_msg').textContent='시트·날짜·Tier·체결단가·수량은 필수입니다.'; return; }
+  const pl = sheetPayloadByName(sheet);
   const row = {
-    sheet, symbol: v('p_symbol')||null, date,
+    sheet, symbol: (pl && pl.symbol) || null, date,        // 종목은 시트 설정에서 자동
     tier: parseInt(tier)||0, side: ($('p_side')?$('p_side').value:'buy'),
     price: parseFloat(price)||0, qty: parseInt(qty)||0,
-    fee: parseFloat(v('p_fee'))||0, cycle: parseInt(v('p_cycle'))||1
+    fee: parseFloat(v('p_fee'))||0, cycle: 1               // Cycle 미사용(기본 1)
   };
   try {
     const r = await fetch(`${URL_}/rest/v1/trades`, {
