@@ -168,11 +168,10 @@
           <input type="file" id="imp_file" accept=".csv,.xlsx,.xls" onchange="importFile(event)">
           <button class="ghost" onclick="$('imp_file').value='';$('imp_file').click()">파일 선택</button>
         </div>
-        <div class="row" id="imp_msg">구글시트 → 다운로드 → CSV 또는 Excel(.xlsx). 날짜·Tier·거래구분(매수/매도)·체결단가·수량·수수료·Cycle 열을 자동 인식합니다. (최신→과거 순서를 자동으로 시간순 정렬)</div>
+        <div class="row" id="imp_msg">구글시트 → 다운로드 → CSV 또는 Excel(.xlsx). 날짜·Tier·거래구분(매수/매도)·체결단가·수량·수수료 열을 자동 인식합니다. (최신→과거 순서를 자동으로 시간순 정렬)</div>
       </div>
       <div class="fbar">
         <label>시트 필터</label><select id="p_filter_sheet" onchange="drawPnl()"><option value="">전체</option></select>
-        <label>Cycle</label><select id="p_filter_cycle" onchange="drawPnl()"><option value="">전체</option></select>
         <span id="pnl_count" class="row"></span>
         <button class="delx" onclick="delTradesFiltered()">필터한 것 삭제</button>
         <button class="delx" onclick="delTradesAll()">전체 삭제</button>
@@ -702,8 +701,6 @@ function renderPnl(rows){
   const fromSheets = Object.values(_sheets||{}).map(s=>s && s.name).filter(Boolean);
   const sheets = [...new Set([...fromTrades, ...fromSheets])].sort((a,b)=>String(a).localeCompare(String(b),'ko'));
   fillOptions($('p_filter_sheet'), sheets);
-  const cycles = [...new Set(_trades.map(t=>String(t.cycle)).filter(v=>v&&v!=='null'))].sort((a,b)=>Number(a)-Number(b));
-  fillOptions($('p_filter_cycle'), cycles);
   const dl = $('p_sheets'); if(dl) dl.innerHTML = sheets.map(s=>`<option value="${esc(s)}">`).join('');
   drawPnl();
 }
@@ -797,7 +794,6 @@ function applyMonthlyState(){
 function drawPnl(){
   const n2=v=>(v==null?'':Number(v).toFixed(2));
   const fs = $('p_filter_sheet')?$('p_filter_sheet').value:'';
-  const fc = $('p_filter_cycle')?$('p_filter_cycle').value:'';
   const R = computeTradeProfits(_trades);
   const profit = R.profit;
   renderOrderEditor();                 // 시트 순서 편집기
@@ -830,9 +826,9 @@ function drawPnl(){
   }).join('');
   $('pnl_summary').innerHTML = cards || '<div class="row">입력된 거래 없음 — 아래에서 매수/매도를 추가하세요.</div>';
   // ── 거래 표(필터 적용, 최신순) ──
-  let rows = _trades.filter(t => (!fs||t.sheet===fs) && (!fc||String(t.cycle)===fc));
+  let rows = _trades.filter(t => (!fs||t.sheet===fs));
   const head = `<table><tr><th>날짜</th><th>시트</th><th>Tier</th><th>구분</th><th>체결단가</th>
-    <th>수량</th><th>수수료</th><th>거래금액</th><th>Cycle</th><th>수익금</th><th></th></tr>`;
+    <th>수량</th><th>수수료</th><th>거래금액</th><th>수익금</th><th></th></tr>`;
   const body = rows.map(t=>{
     const k = pcKeyForSheetName(t.sheet);
     const isSell = t.side==='sell';
@@ -843,13 +839,13 @@ function drawPnl(){
       <td>${esc(t.sheet)}</td><td>${esc(t.tier)}</td>
       <td>${isSell?'매도':'매수'}</td>
       <td>$${fmtUSD(t.price)}</td><td>${esc(t.qty)}</td><td>$${fmtUSD(t.fee)}</td>
-      <td>$${fmtUSD(tradeNet(t))}</td><td>${esc(t.cycle)}</td>
+      <td>$${fmtUSD(tradeNet(t))}</td>
       <td>${isSell?('<b class="'+(pf>=0?'gain':'loss')+'">$'+fmtUSD(pf)+'</b>'+(um?` <span class="loss">(미매칭 ${um})</span>`:'')):'-'}</td>
       <td><button class="delx" onclick="delTrade('${esc(t.id)}')">삭제</button></td>
     </tr>`;
   }).join('');
-  if($('pnl_count')) $('pnl_count').textContent = `${rows.length}건${(fs||fc)?' (필터)':''}`;
-  $('pnl_table').innerHTML = head + (body || '<tr><td colspan="11" class="row">거래 없음</td></tr>') + '</table>';
+  if($('pnl_count')) $('pnl_count').textContent = `${rows.length}건${fs?' (필터)':''}`;
+  $('pnl_table').innerHTML = head + (body || '<tr><td colspan="10" class="row">거래 없음</td></tr>') + '</table>';
 }
 // 월별(YYYY-MM) × 시트 수익금 매트릭스 + 전체(월합/수익률) + 합계 행. 필터 무관(전체 데이터).
 function renderMonthly(R){
@@ -930,12 +926,9 @@ async function delByQuery(q){
 }
 async function delTradesFiltered(){
   const fs=$('p_filter_sheet')?$('p_filter_sheet').value:'';
-  const fc=$('p_filter_cycle')?$('p_filter_cycle').value:'';
-  if(!fs && !fc) return delTradesAll();
-  const parts=[]; if(fs) parts.push('sheet=eq.'+encodeURIComponent(fs)); if(fc) parts.push('cycle=eq.'+encodeURIComponent(fc));
-  const desc=(fs?`시트 '${fs}'`:'')+(fc?` Cycle ${fc}`:'');
-  if(!confirm(`${desc} 의 거래를 모두 삭제할까요? (되돌릴 수 없음)`)) return;
-  await delByQuery('trades?'+parts.join('&'));
+  if(!fs) return delTradesAll();
+  if(!confirm(`시트 '${fs}' 의 거래를 모두 삭제할까요? (되돌릴 수 없음)`)) return;
+  await delByQuery('trades?sheet=eq.'+encodeURIComponent(fs));
 }
 async function delTradesAll(){
   if(!confirm('손익 탭의 모든 거래를 삭제할까요? (되돌릴 수 없음)')) return;
