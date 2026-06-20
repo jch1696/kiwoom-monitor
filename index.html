@@ -44,8 +44,8 @@
   .fsel { background:#1E232A; color:#E6E6E6; border:1px solid #3a3f46; border-radius:6px; padding:4px 8px; font-size:13px; }
   input.pin-sheet { width:170px; font-size:14px; padding:5px 8px; }
   input.pin-date { width:160px; font-size:14px; padding:5px 8px; }
-  .autohint { margin-top:10px; font-size:16px; font-weight:800; color:#ffd23f; background:#2a2410; border:1px solid #6b5a10; border-radius:8px; padding:8px 12px; display:inline-block; }
-  .autohint.on { color:#7fe7ff; background:#0e2630; border-color:#1c5566; }
+  .autohint { margin-top:10px; font-size:14px; font-weight:600; color:#aeb6c2; background:#1a1f27; border:1px solid #333b46; border-radius:8px; padding:7px 12px; display:inline-block; }
+  .autohint.on { color:#8fcfa3; background:#161f1a; border-color:#2f4d39; }
   .gain { color:#37d67a; font-weight:700; } .loss { color:#e06c6c; font-weight:700; }
   .seedin { width:90px; background:#11151a; color:#E6E6E6; border:1px solid #3a3f46; border-radius:5px; padding:2px 6px; font-size:12px; }
   .ochips { display:flex; flex-wrap:wrap; margin-top:6px; }
@@ -151,7 +151,7 @@
           <select id="p_side" class="fsel" onchange="autofillTrade();pPersist()"><option value="buy">매수</option><option value="sell">매도</option></select>
           <label>체결단가</label><input id="p_price" size="9" oninput="recomputeFee()">
           <label>수량</label><input id="p_qty" size="7" oninput="recomputeFee()">
-          <label>수수료(0.07%)</label><input id="p_fee" size="9" value="0">
+          <input id="p_fee" type="hidden" value="0">
           <button onclick="addTrade()">추가</button>
           <span id="pnl_msg" class="row"></span>
         </div>
@@ -761,8 +761,8 @@ function autofillTrade(){
   const qty = r.sell_qty;
   if($('p_price')) $('p_price').value = price? price.toFixed(2):'';
   if($('p_qty')) $('p_qty').value = qty||'';
-  recomputeFee();                                  // 수수료 0.07% 자동
-  setHint(`✔ ${side==='sell'?'매도가':'매수가'} $${price?price.toFixed(2):'-'} · 수량 ${qty} · 수수료 $${$('p_fee')?$('p_fee').value:'0'} 자동입력 (다르면 수정)`, true);
+  recomputeFee();                                  // 수수료 0.07% 자동(숨김 저장)
+  setHint(`✔ ${side==='sell'?'매도가':'매수가'} $${price?price.toFixed(2):'-'} · 수량 ${qty} 자동입력 (다르면 수정)`, true);
 }
 
 // ── 입력 고정(반복입력 방지) — 시트/날짜/Tier/구분을 저장·복원 ──
