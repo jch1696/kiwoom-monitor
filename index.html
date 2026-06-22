@@ -17,6 +17,8 @@
   button.ghost { background:#2A2F36; color:#E6E6E6; }
   .login { display:flex; flex-direction:column; gap:8px; align-items:flex-start; max-width:760px; }
   .lnk { color:#7fb0ff; cursor:pointer; font-size:13px; text-decoration:underline; }
+  .chk2 { display:inline-flex; align-items:center; gap:5px; font-size:13px; white-space:nowrap; }
+  .vdiv { width:1px; height:22px; background:#3a3f46; margin:0 2px; }
   .srvbox { display:flex; gap:8px; flex-wrap:wrap; align-items:center; background:#161a20; border:1px solid #2A2F36; border-radius:8px; padding:10px 12px; margin-top:4px; }
   .bar { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
   .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap:12px; }
@@ -100,11 +102,12 @@
 
   <!-- 로그인 (이메일·비밀번호만) -->
   <div id="loginBox" class="login">
-    <div class="srow" style="flex-wrap:wrap;">
-      <input id="email" placeholder="이메일" size="20">
-      <input id="pw" placeholder="비밀번호" size="16" type="password" onkeydown="if(event.key==='Enter')login()">
+    <div class="srow" style="flex-wrap:wrap; gap:10px;">
+      <input id="email" placeholder="이메일" style="width:250px;">
+      <input id="pw" placeholder="비밀번호" type="password" style="width:170px;" onkeydown="if(event.key==='Enter')login()">
       <button onclick="login()">로그인</button>
-      <label style="font-size:13px"><input type="checkbox" id="remember" checked> 기억</label>
+      <label class="chk2"><input type="checkbox" id="remember" checked> 기억</label>
+      <span class="vdiv"></span>
       <a class="lnk" onclick="toggleServer()">⚙ 서버 설정</a>
     </div>
     <div id="srvbox" class="hidden srvbox">
