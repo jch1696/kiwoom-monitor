@@ -15,7 +15,9 @@
   input { padding:8px 10px; border-radius:8px; border:1px solid #2A2F36; background:#1E232A; color:#E6E6E6; }
   button { padding:8px 14px; border-radius:8px; border:0; background:#1DB954; color:#08130b; font-weight:700; cursor:pointer; }
   button.ghost { background:#2A2F36; color:#E6E6E6; }
-  .login { display:flex; gap:8px; flex-wrap:wrap; align-items:center; max-width:760px; }
+  .login { display:flex; flex-direction:column; gap:8px; align-items:flex-start; max-width:760px; }
+  .lnk { color:#7fb0ff; cursor:pointer; font-size:13px; text-decoration:underline; }
+  .srvbox { display:flex; gap:8px; flex-wrap:wrap; align-items:center; background:#161a20; border:1px solid #2A2F36; border-radius:8px; padding:10px 12px; margin-top:4px; }
   .bar { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
   .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap:12px; }
   .card { background:#1E232A; border:1px solid #2A2F36; border-radius:12px; padding:14px; }
@@ -96,14 +98,20 @@
 <body>
   <h1>kiwoom-trade 원격 모니터</h1>
 
-  <!-- 로그인 -->
+  <!-- 로그인 (이메일·비밀번호만) -->
   <div id="loginBox" class="login">
-    <input id="url" placeholder="Supabase URL (https://xxx.supabase.co)" size="32">
-    <input id="key" placeholder="anon key" size="28" type="password">
-    <input id="email" placeholder="관리계정 이메일" size="18">
-    <input id="pw" placeholder="비밀번호" size="14" type="password">
-    <button onclick="login()">로그인</button>
-    <label style="font-size:13px"><input type="checkbox" id="remember" checked> 기억</label>
+    <div class="srow" style="flex-wrap:wrap;">
+      <input id="email" placeholder="이메일" size="20">
+      <input id="pw" placeholder="비밀번호" size="16" type="password" onkeydown="if(event.key==='Enter')login()">
+      <button onclick="login()">로그인</button>
+      <label style="font-size:13px"><input type="checkbox" id="remember" checked> 기억</label>
+      <a class="lnk" onclick="toggleServer()">⚙ 서버 설정</a>
+    </div>
+    <div id="srvbox" class="hidden srvbox">
+      <input id="url" placeholder="Supabase URL (https://xxx.supabase.co)" size="32">
+      <input id="key" placeholder="anon key" size="28" type="password">
+      <div class="row">보통 비워둬도 됩니다(배포본에 기본값 내장). 다른 프로젝트면 입력 후 로그인.</div>
+    </div>
   </div>
 
   <!-- 로그인 후 -->
@@ -112,7 +120,14 @@
       <span id="who" class="row"></span>
       <button class="ghost" onclick="logout()">로그아웃</button>
       <button class="ghost" onclick="refresh()">새로고침</button>
+      <button class="ghost" onclick="toggleSrvApp()">⚙ 서버</button>
       <label style="font-size:13px"><input type="checkbox" id="auto" checked> 10초 자동</label>
+    </div>
+    <div id="srvapp" class="hidden srvbox">
+      <span class="row">Supabase 연결 (보통 그대로 두세요)</span>
+      <input id="srv_url" placeholder="Supabase URL" size="32">
+      <input id="srv_key" placeholder="anon key" size="28" type="password">
+      <button onclick="saveServer()">저장</button>
     </div>
 
     <div class="tabs">
@@ -229,16 +244,31 @@ function ldel(k){ try { localStorage.removeItem('kt_'+k); } catch(e){} }
 window.onload = () => {
   const u0 = lget('url') || DEFAULT_URL, k0 = lget('key') || DEFAULT_KEY;
   $('url').value = u0; $('key').value = k0; $('email').value = lget('email');
+  // 서버 주소/키가 없으면(소스 직접 실행 등) 서버 설정을 펼쳐 안내
+  if (!u0 || !k0) $('srvbox').classList.remove('hidden');
   const tok = lget('token');
   if (u0 && k0 && tok) { URL_=u0; KEY_=k0; TOKEN_=tok; showApp(); refresh(); }
   setInterval(() => { if (!$('app').classList.contains('hidden') && $('auto').checked) refresh(); }, 10000);
 };
+function toggleServer(){ $('srvbox').classList.toggle('hidden'); }
+function toggleSrvApp(){
+  const b=$('srvapp'); b.classList.toggle('hidden');
+  if(!b.classList.contains('hidden')){ $('srv_url').value=URL_; $('srv_key').value=KEY_; }
+}
+function saveServer(){
+  const u=$('srv_url').value.trim().replace(/\/$/,''), k=$('srv_key').value.trim();
+  if(!u || !k){ $('msg').textContent='URL과 키를 입력하세요.'; return; }
+  URL_=u; KEY_=k; lset('url',u); lset('key',k);
+  $('srvapp').classList.add('hidden');
+  $('msg').textContent='서버 설정 저장됨. 새로고침합니다.'; refresh();
+}
 
 async function login(){
   $('msg').textContent = '';
   URL_ = $('url').value.trim().replace(/\/$/,''); KEY_ = $('key').value.trim();
   const email = $('email').value.trim(), pw = $('pw').value;
-  if (!URL_ || !KEY_ || !email || !pw){ $('msg').textContent='모든 칸을 입력하세요.'; return; }
+  if (!URL_ || !KEY_){ $('msg').textContent='먼저 ⚙ 서버 설정에서 Supabase URL·키를 입력하세요.'; $('srvbox').classList.remove('hidden'); return; }
+  if (!email || !pw){ $('msg').textContent='이메일과 비밀번호를 입력하세요.'; return; }
   try {
     const r = await fetch(`${URL_}/auth/v1/token?grant_type=password`, {
       method:'POST', headers:{ apikey:KEY_, 'Content-Type':'application/json' },
