@@ -172,12 +172,11 @@
       <button class="ghost" id="btn_monthly" onclick="toggleMonthly()">📅 월별 수익 합계 펼치기 ▾</button>
       <div id="pnl_monthly" class="hidden"></div>
       <div class="card" style="margin:10px 0;">
-        <datalist id="p_sheets"></datalist>
         <input id="p_fee" type="hidden" value="0">
         <div class="pform">
-          <div class="fld"><label>시트</label><input id="p_sheet" list="p_sheets" placeholder="예: SOXL_창호" onchange="autofillTrade();pPersist()"></div>
+          <div class="fld"><label>시트</label><select id="p_sheet" onchange="onSheetChange()"><option value="">시트 선택</option></select></div>
           <div class="fld"><label>날짜</label><input id="p_date" type="date" onchange="pPersist()"></div>
-          <div class="fld"><label>Tier</label><input id="p_tier" oninput="autofillTrade()" onchange="pPersist()"></div>
+          <div class="fld"><label>Tier</label><select id="p_tier" onchange="autofillTrade();pPersist()"><option value="">층</option></select></div>
           <div class="fld"><label>구분</label><select id="p_side" onchange="autofillTrade();pPersist()"><option value="buy">매수</option><option value="sell">매도</option></select></div>
           <div class="fld"><label>체결단가</label><input id="p_price" oninput="recomputeFee()"></div>
           <div class="fld"><label>수량</label><input id="p_qty" oninput="recomputeFee()"></div>
@@ -807,9 +806,34 @@ function renderPnl(rows){
   const fromSheets = Object.values(_sheets||{}).map(s=>s && s.name).filter(Boolean);
   const sheets = [...new Set([...fromTrades, ...fromSheets])].sort((a,b)=>String(a).localeCompare(String(b),'ko'));
   fillOptions($('p_filter_sheet'), sheets);
-  const dl = $('p_sheets'); if(dl) dl.innerHTML = sheets.map(s=>`<option value="${esc(s)}">`).join('');
+  populateSheetSelect(sheets);     // 입력 폼 시트 드롭다운(항상 select)
+  populateTierSelect();            // 그 시트의 1~총라인수 Tier 드롭다운
+  if(!_pnlAutofilledOnce){ _pnlAutofilledOnce=true; autofillTrade(); }  // 드롭다운 복원 후 1회 자동입력
   drawPnl();
 }
+let _pnlAutofilledOnce=false;
+// ── 입력 폼: 시트/Tier 드롭다운 채우기(선택값·저장값 보존, 불필요 재생성 억제) ──
+let _sheetSelSig='', _tierSelSig='';
+function populateSheetSelect(sheets){
+  const sel=$('p_sheet'); if(!sel) return;
+  const sig=sheets.join('|'); if(sig===_sheetSelSig) return; _sheetSelSig=sig;   // 목록 같으면 유지
+  const want=sel.value || lget('pnl_p_sheet','');
+  sel.innerHTML='<option value="">시트 선택</option>'+sheets.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  if(sheets.indexOf(want)>=0) sel.value=want;
+}
+function populateTierSelect(){
+  const sel=$('p_tier'); if(!sel) return;
+  const p=sheetPayloadByName($('p_sheet')?$('p_sheet').value:'');
+  const max=(p && parseInt(p.total_lines))?parseInt(p.total_lines):60;            // 시트설정 없으면 1~60
+  const sig=String(max); if(sig===_tierSelSig && sel.options.length>1) return;     // 층수 같으면 유지
+  _tierSelSig=sig;
+  const want=sel.value || lget('pnl_p_tier','');
+  let opts='<option value="">층</option>';
+  for(let L=1; L<=max; L++) opts+=`<option value="${L}">${L}</option>`;
+  sel.innerHTML=opts;
+  if(want && Number(want)>=1 && Number(want)<=max) sel.value=want;
+}
+function onSheetChange(){ _tierSelSig=''; populateTierSelect(); autofillTrade(); pPersist(); }  // 시트 바뀌면 Tier 목록 갱신
 function sheetSeed(sheet){                                   // 투입원금 — 시트설정 우선, 없으면 사용자 설정값
   const s = Object.values(_sheets||{}).find(x=>x && x.name===sheet);
   const cfg = s && s.payload ? Number(s.payload.seed_amount)||0 : 0;
