@@ -169,6 +169,7 @@
       <h2>실현 손익 (실제 체결 입력 — Tier·Cycle 매칭, HTS 손익 아님)</h2>
       <div id="pnl_order"></div>
       <div id="pnl_summary" class="grid"></div>
+      <div id="cappanel" class="hidden"></div>
       <button class="ghost" id="btn_monthly" onclick="toggleMonthly()">📅 월별 수익 합계 펼치기 ▾</button>
       <div id="pnl_monthly" class="hidden"></div>
       <div class="card" style="margin:10px 0;">
@@ -840,10 +841,65 @@ function sheetSeed(sheet){                                   // 투입원금 —
   const cfg = s && s.payload ? Number(s.payload.seed_amount)||0 : 0;
   return cfg || Number(lget('seed_'+sheet,'0'))||0;
 }
-function setSeed(sheet, val){                                // 카드에서 투입원금 직접 설정(저장)
+function setSeed(sheet, val){                                // 카드에서 투입원금(초기) 직접 설정(저장)
   const n = Number(String(val).replace(/[$,\s]/g,''))||0;
   if(n) lset('seed_'+sheet, String(n)); else ldel('seed_'+sheet);
   drawPnl();
+}
+
+// ── 원금 변경(날짜별) — 시간가중 평균원금으로 누적·연수익률 정확화 ──────────────
+function capChanges(sheet){
+  try { return (JSON.parse(lget('cap_'+sheet,'[]'))||[]).filter(c=>c&&c.date&&Number(c.amount)>0)
+              .sort((a,b)=>String(a.date).localeCompare(String(b.date))); }
+  catch(e){ return []; }
+}
+function capSet(sheet, arr){ lset('cap_'+sheet, JSON.stringify(arr)); }
+function _daysBetween(a,b){ return Math.max(0,(Date.parse(b)-Date.parse(a))/86400000); }
+function effPrincipal(sheet, startDate, seed){              // 시간가중 평균원금
+  const today = new Date().toISOString().slice(0,10);
+  const total = _daysBetween(startDate, today) || 1;
+  const pts = [{date:startDate, amount:Number(seed)||0}]
+    .concat(capChanges(sheet).filter(c=>c.date>startDate && c.date<=today)
+                             .map(c=>({date:c.date, amount:Number(c.amount)||0})))
+    .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  let acc = 0;
+  for(let i=0;i<pts.length;i++){
+    const s = pts[i].date, e = (i+1<pts.length)?pts[i+1].date:today;
+    acc += (Number(pts[i].amount)||0) * _daysBetween(s,e);
+  }
+  return total>0 ? acc/total : (Number(seed)||0);
+}
+function openCap(sheet){
+  const box=$('cappanel'); if(!box) return;
+  if(box.dataset.open===sheet){ return closeCap(); }
+  box.dataset.open=sheet; renderCapEditor(sheet); box.classList.remove('hidden');
+}
+function closeCap(){ const b=$('cappanel'); if(b){ b.classList.add('hidden'); b.dataset.open=''; b.innerHTML=''; } }
+function renderCapEditor(sheet){
+  const box=$('cappanel'); if(!box || box.dataset.open!==sheet) return;
+  const list = capChanges(sheet).map((c,i)=>
+    `<div class="srow">· <b>${esc(c.date)}</b> 부터 원금 <b>$${fmtUSD(c.amount)}</b>
+       <button class="delx" onclick="capDel('${esc(sheet).replace(/'/g,'')}',${i})">삭제</button></div>`).join('');
+  box.innerHTML = `<div class="card" style="margin:8px 0;">
+    <div class="lnhead">📅 ${esc(sheet)} — 원금 변경 이력 <button class="ghost" onclick="closeCap()">닫기 ✕</button></div>
+    <div class="row" style="margin:4px 0;color:#9aa0a6;">시작 원금은 카드의 '투입원금'이에요. 여기에 <b>바뀐 날짜 + 새 원금</b>을 넣으면 그 날부터 적용돼 연수익률이 정확해집니다(시간가중).</div>
+    <div class="srow" style="flex-wrap:wrap;">
+      <label>변경일</label><input type="date" id="cap_d">
+      <label>새 원금</label><input id="cap_a" placeholder="예: 70000" style="width:120px;">
+      <button onclick="capAdd('${esc(sheet).replace(/'/g,'')}')">추가</button>
+    </div>
+    ${list || '<div class="row">변경 없음</div>'}</div>`;
+}
+function capAdd(sheet){
+  const d=$('cap_d')?$('cap_d').value:'';
+  const a=Number(String($('cap_a')?$('cap_a').value:'').replace(/[$,\s]/g,''))||0;
+  if(!d || !a){ return; }
+  const arr=capChanges(sheet); arr.push({date:d, amount:a}); capSet(sheet, arr);
+  renderCapEditor(sheet); drawPnl();
+}
+function capDel(sheet, i){
+  const arr=capChanges(sheet); arr.splice(i,1); capSet(sheet, arr);
+  renderCapEditor(sheet); drawPnl();
 }
 
 // ── 시트 설정값으로 매수가/매도가/수량 자동 계산(봇 compute_sheet 동일) ──────
@@ -939,20 +995,26 @@ function drawPnl(){
     const ts = bySheet[sh];
     const sells = ts.filter(t=>t.side==='sell');
     const sum = sells.reduce((acc,t)=>acc+(profit[t.id]||0),0);
-    const seed = sheetSeed(sh);
-    const ret = seed? (sum/seed*100):null;                 // 누적수익률
+    const seed = sheetSeed(sh);                            // 시작(초기) 원금
     const dates = ts.map(t=>t.date).filter(Boolean).sort();
     const start = dates[0]||'';                            // 시작 날짜 = 최초 거래일
     const days = start? Math.max(1,(todayMs - Date.parse(start))/86400000) : 0;
+    const changes = capChanges(sh);                        // 원금 변경(날짜+금액)
+    const effSeed = (changes.length && start) ? effPrincipal(sh, start, seed) : seed;   // 시간가중 평균원금
+    const ret = effSeed? (sum/effSeed*100):null;           // 누적수익률(평균원금 기준)
     const annRet = (ret!=null && days)? ret*365/days : null;   // 연 수익률 = 누적 × 365/기간일
     const price = _priceBySheet[sh];                       // 현재가(모니터에서, 라이브 시트만)
+    const pl = sheetPayloadByName(sh);
+    const tier1 = pl ? (Number(pl.first_buy_price)||0) : 0; // 1층(1라인가)
+    const shx = esc(sh).replace(/'/g,'');
     const k = pcKeyForSheetName(sh);
     return `<div class="card" style="background:${pcBg(k)};border-left:6px solid ${pcAccent(k)};">
       <div class="sym">${esc(sh)}</div>
-      <div class="row">시작 ${start||'-'} · 현재가 ${price!=null?('$'+fmtUSD(price)):'-'}</div>
+      <div class="row">시작 ${start||'-'} · 현재가 ${price!=null?('$'+fmtUSD(price)):'-'} · 1층 ${tier1?('$'+fmtUSD(tier1)):'-'}</div>
       <div class="row">총 매도 ${sells.length}회 · 거래 ${ts.length}건</div>
       <div class="row">총 수익금 <b class="${sum>=0?'gain':'loss'}">$${fmtUSD(sum)}</b></div>
-      <div class="row">투입원금 <input class="seedin" value="${seed||''}" placeholder="설정" onchange="setSeed('${esc(sh).replace(/'/g,'')}',this.value)"></div>
+      <div class="row">투입원금 <input class="seedin" value="${seed||''}" placeholder="설정" onchange="setSeed('${shx}',this.value)">${changes.length?` <span class="row">→ 평균 $${fmtUSD(effSeed)}</span>`:''}
+        <button class="ghost capbtn" onclick="openCap('${shx}')">원금변경${changes.length?'('+changes.length+')':''} ▾</button></div>
       <div class="row">누적수익률 ${pctSpan(ret)} · 연수익률 ${pctSpan(annRet)}</div>
     </div>`;
   }).join('');
