@@ -1018,8 +1018,9 @@ function drawPnl(){
       <div class="row">현재가 ${price!=null?('$'+fmtUSD(price)):'-'} · 1층 ${tier1?('$'+fmtUSD(tier1)):'-'}</div>
       <div class="row">총 매도 ${sells.length}회 · 거래 ${ts.length}건</div>
       <div class="row">총 수익금 <b class="${sum>=0?'gain':'loss'}">$${fmtUSD(sum)}</b></div>
-      <div class="row">투입원금 <input class="seedin" value="${seed||''}" placeholder="설정" onchange="setSeed('${shx}',this.value)">${changes.length?` <span class="row">→ 평균 $${fmtUSD(effSeed)}</span>`:''}
+      <div class="row">투입원금 <input class="seedin" value="${seed||''}" placeholder="설정" onchange="setSeed('${shx}',this.value)">
         <button class="ghost capbtn" onclick="openCap('${shx}')">원금변경${changes.length?'('+changes.length+')':''} ▾</button></div>
+      ${changes.length?`<div class="row">평균원금 <b>$${fmtUSD(effSeed)}</b> <span style="color:#9aa0a6;">(기간가중)</span></div>`:''}
       <div class="row">누적수익률 ${pctSpan(ret)} · 연수익률 ${pctSpan(annRet)}</div>
     </div>`;
   }).join('');
