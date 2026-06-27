@@ -858,14 +858,18 @@ function _daysBetween(a,b){ return Math.max(0,(Date.parse(b)-Date.parse(a))/8640
 function effPrincipal(sheet, startDate, seed){              // 시간가중 평균원금
   const today = new Date().toISOString().slice(0,10);
   const total = _daysBetween(startDate, today) || 1;
-  const pts = [{date:startDate, amount:Number(seed)||0}]
-    .concat(capChanges(sheet).filter(c=>c.date>startDate && c.date<=today)
-                             .map(c=>({date:c.date, amount:Number(c.amount)||0})))
-    .sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  // 시작일 기본값=투입원금(seed). 변경이 시작일에 있으면 그 값이 시작 원금(seed 대신).
+  // 시작 전 변경은 시작일로 당기고, 미래(오늘 이후) 변경은 무시.
+  const map = {}; map[startDate] = Number(seed)||0;
+  capChanges(sheet).forEach(c=>{
+    const d = c.date < startDate ? startDate : c.date;
+    if(d <= today) map[d] = Number(c.amount)||0;
+  });
+  const dates = Object.keys(map).sort((a,b)=>a.localeCompare(b));
   let acc = 0;
-  for(let i=0;i<pts.length;i++){
-    const s = pts[i].date, e = (i+1<pts.length)?pts[i+1].date:today;
-    acc += (Number(pts[i].amount)||0) * _daysBetween(s,e);
+  for(let i=0;i<dates.length;i++){
+    const s = dates[i], e = (i+1<dates.length)?dates[i+1]:today;
+    acc += map[s] * _daysBetween(s, e);
   }
   return total>0 ? acc/total : (Number(seed)||0);
 }
@@ -882,7 +886,7 @@ function renderCapEditor(sheet){
        <button class="delx" onclick="capDel('${esc(sheet).replace(/'/g,'')}',${i})">삭제</button></div>`).join('');
   box.innerHTML = `<div class="card" style="margin:8px 0;">
     <div class="lnhead">📅 ${esc(sheet)} — 원금 변경 이력 <button class="ghost" onclick="closeCap()">닫기 ✕</button></div>
-    <div class="row" style="margin:4px 0;color:#9aa0a6;">시작 원금은 카드의 '투입원금'이에요. 여기에 <b>바뀐 날짜 + 새 원금</b>을 넣으면 그 날부터 적용돼 연수익률이 정확해집니다(시간가중).</div>
+    <div class="row" style="margin:4px 0;color:#9aa0a6;"><b>바뀐 날짜 + 그 날부터의 원금</b>을 넣으면 그 날부터 적용됩니다(시간가중 평균으로 수익률 계산). <b>시작일(첫 거래일)에 넣으면 그 값이 시작 원금</b>이 되고, 안 넣으면 카드의 '투입원금'이 시작 원금입니다.</div>
     <div class="srow" style="flex-wrap:wrap;">
       <label>변경일</label><input type="date" id="cap_d">
       <label>새 원금</label><input id="cap_a" placeholder="예: 70000" style="width:120px;">
@@ -1010,7 +1014,8 @@ function drawPnl(){
     const k = pcKeyForSheetName(sh);
     return `<div class="card" style="background:${pcBg(k)};border-left:6px solid ${pcAccent(k)};">
       <div class="sym">${esc(sh)}</div>
-      <div class="row">시작 ${start||'-'} · 현재가 ${price!=null?('$'+fmtUSD(price)):'-'} · 1층 ${tier1?('$'+fmtUSD(tier1)):'-'}</div>
+      <div class="row">시작 ${start||'-'}</div>
+      <div class="row">현재가 ${price!=null?('$'+fmtUSD(price)):'-'} · 1층 ${tier1?('$'+fmtUSD(tier1)):'-'}</div>
       <div class="row">총 매도 ${sells.length}회 · 거래 ${ts.length}건</div>
       <div class="row">총 수익금 <b class="${sum>=0?'gain':'loss'}">$${fmtUSD(sum)}</b></div>
       <div class="row">투입원금 <input class="seedin" value="${seed||''}" placeholder="설정" onchange="setSeed('${shx}',this.value)">${changes.length?` <span class="row">→ 평균 $${fmtUSD(effSeed)}</span>`:''}
