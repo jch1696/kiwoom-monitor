@@ -747,19 +747,20 @@ function drawSettlements(){
   // 필터 적용. 단일 종목/시트로 좁히면 흐름을 보기 쉽게 날짜 오름차순(과거→최신).
   let rows = _settlements.filter(d => (!fs || d.sheet===fs) && (!fy || d.symbol===fy));
   if(fs || fy) rows = rows.slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
-  const head = `<table><tr><th>날짜</th><th>시트</th><th>종목</th><th>티어</th><th>잔고(차)</th>
+  const head = `<table><tr><th>날짜</th><th>시트</th><th>종목</th><th>티어</th><th>1티어</th><th>잔고(차)</th>
     <th>투자금</th><th>예수금</th><th>주식평가금</th><th>잔고수익</th>
     <th>매수예정</th><th>인출가능</th><th>아바타수익</th><th>매수</th><th>매도</th></tr>`;
   const body = rows.map(d => { const k = d.agent_id || d.sheet; return `<tr style="background:${pcBg(k)}">
     <td style="box-shadow:inset 6px 0 0 ${pcAccent(k)}">${esc(d.date)}</td><td>${esc(d.sheet)}</td><td>${esc(d.symbol)}</td>
     <td>${esc(d.tier)}/${esc(d.total_tiers)}T</td>
+    <td>${n2(d.tier1_price)}</td>
     <td>${esc(d.balance_qty)}(${esc(d.qty_change)})</td>
     <td>${n0(d.invest)}</td><td>${n2(d.cash)}</td><td>${n2(d.stock_value)}</td><td>${pct(d.balance_return)}</td>
     <td>${n0(d.planned_buy)}</td><td>${n0(d.withdrawable)}</td><td>${pct(d.avatar_return)}</td>
     <td>${esc(d.buys)}</td><td>${esc(d.sells)}</td>
   </tr>`; }).join('');
   if($('settle_count')) $('settle_count').textContent = `${rows.length}건${(fs||fy)?' (필터)':''}`;
-  $('settlements').innerHTML = head + (body || '<tr><td colspan="14" class="row">정산 없음 — 봇이 지정 시각에 자동 기록합니다.</td></tr>') + '</table>';
+  $('settlements').innerHTML = head + (body || '<tr><td colspan="15" class="row">정산 없음 — 봇이 지정 시각에 자동 기록합니다.</td></tr>') + '</table>';
 }
 
 // ── 실현 손익 (수동 입력 거래 → Tier·Cycle FIFO 매칭) ───────────────────────
