@@ -1053,22 +1053,35 @@ function drawPnl(){
 // 전체 투입원금(월/년 수익률 분모) — 설정값 우선, 없으면 시트 투입원금 합계.
 function sumSeeds(sheets){ return sheets.reduce((a,s)=>a+(sheetSeed(s)||0),0); }
 function setMonPrincipal(v){ const n=Number(String(v).replace(/[$,\s]/g,''))||0; if(n) lset('mon_principal',String(n)); else ldel('mon_principal'); drawPnl(); }
-// 기간(월 또는 년) × 시트 수익금 매트릭스 + 전체 + 수익률(=수익÷전체투입원금) + 합계 행.
-function _periodTable(labelCol, periodMap, sheets, principal){
+// 각 시트의 최초 거래일(시작일)
+function sheetStartMap(){ const m={}; _trades.forEach(t=>{ if(!t.sheet||!t.date) return; if(!m[t.sheet]||t.date<m[t.sheet]) m[t.sheet]=t.date; }); return m; }
+// 특정 날짜 시점의 그 시트 투입원금(시작 전=0, 원금변경 반영)
+function principalAt(sheet, date, startMap){
+  const start=startMap[sheet]; if(!start || date<start) return 0;
+  const map={}; map[start]=sheetSeed(sheet);
+  capChanges(sheet).forEach(c=>{ const d=c.date<start?start:c.date; if(d<=date) map[d]=Number(c.amount)||0; });
+  const dts=Object.keys(map).filter(d=>d<=date).sort();
+  return dts.length ? map[dts[dts.length-1]] : sheetSeed(sheet);
+}
+function perSheetSum(sheets, date, startMap){ return sheets.reduce((a,s)=>a+principalAt(s,date,startMap),0); }
+// 기간(월/년) 표 — 각 기간의 '그때 투입원금'으로 수익률 계산.
+function _periodTable(labelCol, periodMap, sheets, principalOf, repDateOf, curPrincipal){
   const periods=Object.keys(periodMap).sort().reverse();
   const gc=v=>`<b class="${v>=0?'gain':'loss'}">$${fmtUSD(v)}</b>`;
-  const rr=v=> principal? `<b class="${v>=0?'gain':'loss'}">${(v/principal*100).toFixed(2)}%</b>`:'-';
+  const rr=(v,pr)=> pr? `<b class="${v>=0?'gain':'loss'}">${(v/pr*100).toFixed(2)}%</b>`:'-';
   const colTot={}; sheets.forEach(s=>colTot[s]=0); let grand=0;
   const head=`<table><tr><th>${labelCol}</th>`
     + sheets.map(s=>`<th style="border-bottom:3px solid ${pcAccent(pcKeyForSheetName(s))}">${esc(s)}</th>`).join('')
-    + `<th>전체</th><th>수익률</th></tr>`;
+    + `<th>전체</th><th>투입원금</th><th>수익률</th></tr>`;
   const body=periods.map(pk=>{
     const m=periodMap[pk]; grand+=m.p;
     const cells=sheets.map(s=>{ const v=m.bySheet[s]; if(v!=null) colTot[s]+=v; return `<td>${v!=null?gc(v):'-'}</td>`; }).join('');
-    return `<tr><td>${esc(pk)}</td>${cells}<td>${gc(m.p)}</td><td>${rr(m.p)}</td></tr>`;
+    const pr=principalOf(repDateOf(pk));
+    return `<tr><td>${esc(pk)}</td>${cells}<td>${gc(m.p)}</td><td>$${fmtUSD(pr)}</td><td>${rr(m.p,pr)}</td></tr>`;
   }).join('');
   const foot=`<tr style="border-top:2px solid #3a3f46;font-weight:700;"><td>합계</td>`
-    + sheets.map(s=>`<td>${gc(colTot[s])}</td>`).join('')+`<td>${gc(grand)}</td><td>${rr(grand)}</td></tr>`;
+    + sheets.map(s=>`<td>${gc(colTot[s])}</td>`).join('')
+    + `<td>${gc(grand)}</td><td>$${fmtUSD(curPrincipal)}</td><td>${rr(grand,curPrincipal)}</td></tr>`;
   return head+body+foot+'</table>';
 }
 function renderMonthly(R){
@@ -1083,13 +1096,20 @@ function renderMonthly(R){
     if(yr){ const y=byYear[yr]=byYear[yr]||{bySheet:{},p:0}; y.bySheet[t.sheet]=(y.bySheet[t.sheet]||0)+p; y.p+=p; }
   });
   if(!Object.keys(byMonth).length){ box.innerHTML=''; return; }
-  const autoP=sumSeeds(sheets), setP=Number(lget('mon_principal',''))||0;
-  const principal=setP||autoP;                 // 전체 투입원금
-  const pInput=`<div class="row" style="margin:6px 0;">전체 투입원금 <input class="seedin" value="${principal||''}" onchange="setMonPrincipal(this.value)"> <span style="color:#9aa0a6;">수익률 = 수익 ÷ 전체 투입원금${setP?'':' (시트 합계, 직접 설정 가능)'}</span></div>`;
+  const setP=Number(lget('mon_principal',''))||0;
+  const globalP=setP||sumSeeds(sheets);        // 현재 전체 투입원금(설정값 우선)
+  const startMap=sheetStartMap();
+  const today=new Date().toISOString().slice(0,10);
+  const curSum=perSheetSum(sheets, today, startMap);   // 현재 시점 시트합(모양 기준)
+  // 그 기간 투입원금 = 현재 전체원금 × (그때 시트합 / 현재 시트합) → 현재는 그대로, 예전은 축소
+  const principalOf = repDate => (!globalP ? 0 : (!curSum ? globalP : globalP*(perSheetSum(sheets,repDate,startMap)/curSum)));
+  const monthRep = pk => pk+'-31';
+  const yearRep  = pk => pk+'-12-31';
+  const pInput=`<div class="row" style="margin:6px 0;">전체 투입원금(현재) <input class="seedin" value="${globalP||''}" onchange="setMonPrincipal(this.value)"> <span style="color:#9aa0a6;">수익률 = 수익 ÷ 그때 투입원금(시작일·원금변경 반영). 현재는 이 값, 예전 달은 자동 축소.</span></div>`;
   box.innerHTML=`<h3 style="margin:14px 0 6px;color:#cfd3da;font-size:15px;">📅 수익 합계 (시트별 + 전체)</h3>`
     + pInput
-    + `<h4 style="margin:10px 0 4px;color:#cfd3da;font-size:14px;">년도별</h4>` + _periodTable('년', byYear, sheets, principal)
-    + `<h4 style="margin:12px 0 4px;color:#cfd3da;font-size:14px;">월별</h4>` + _periodTable('월', byMonth, sheets, principal);
+    + `<h4 style="margin:10px 0 4px;color:#cfd3da;font-size:14px;">월별</h4>` + _periodTable('월', byMonth, sheets, principalOf, monthRep, globalP)
+    + `<h4 style="margin:12px 0 4px;color:#cfd3da;font-size:14px;">년도별</h4>` + _periodTable('년', byYear, sheets, principalOf, yearRep, globalP);
 }
 async function addTrade(){
   const v = id => { const e=$(id); return e?e.value.trim():''; };
