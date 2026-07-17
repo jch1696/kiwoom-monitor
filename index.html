@@ -55,6 +55,9 @@
   .autohint { margin-top:10px; font-size:14px; font-weight:600; color:#aeb6c2; background:#1a1f27; border:1px solid #333b46; border-radius:8px; padding:7px 12px; display:inline-block; }
   .autohint.on { color:#8fcfa3; background:#161f1a; border-color:#2f4d39; }
   .gain { color:#37d67a; font-weight:700; } .loss { color:#e06c6c; font-weight:700; }
+  .bs { display:inline-block; padding:2px 9px; border-radius:6px; font-weight:700; font-size:12px; }
+  .bs.buy { background:#5a1e1e; color:#ff9b9b; }   /* 매수 = 빨강 */
+  .bs.sell { background:#1e3552; color:#8fc2ff; }  /* 매도 = 파랑 */
   .seedin { width:90px; background:#11151a; color:#E6E6E6; border:1px solid #3a3f46; border-radius:5px; padding:2px 6px; font-size:12px; }
   .ochips { display:flex; flex-wrap:wrap; margin-top:6px; }
   .ochip { display:inline-flex; align-items:center; gap:6px; background:#1a1f26; border:1px solid #2A2F36; border-radius:8px; padding:3px 6px; margin:4px 6px 0 0; font-size:13px; }
@@ -1037,7 +1040,7 @@ function drawPnl(){
     return `<tr style="background:${pcBg(k)}">
       <td style="box-shadow:inset 6px 0 0 ${pcAccent(k)}">${esc(t.date)}</td>
       <td>${esc(t.sheet)}</td><td>${esc(t.tier)}</td>
-      <td>${isSell?'매도':'매수'}</td>
+      <td><span class="bs ${isSell?'sell':'buy'}">${isSell?'매도':'매수'}</span></td>
       <td>$${fmtUSD(t.price)}</td><td>${esc(t.qty)}</td><td>$${fmtUSD(t.fee)}</td>
       <td>$${fmtUSD(tradeNet(t))}</td>
       <td>${isSell?('<b class="'+(pf>=0?'gain':'loss')+'">$'+fmtUSD(pf)+'</b>'+(um?` <span class="loss">(미매칭 ${um})</span>`:'')):'-'}</td>
