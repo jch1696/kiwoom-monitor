@@ -585,6 +585,15 @@ function toggleLines(i){
       <button class="ghost" onclick="bulkFill(${i})">전 라인 적용</button>
       <span class="row" style="color:#8fcfa3;">초록=자동계산: 이 층에서 '매수가'에 '매수량'만큼 사서 '잔고량'이 됨</span>
     </div>
+    <div class="srow" style="flex-wrap:wrap; border-top:1px solid #2A2F36; padding-top:8px; margin-top:8px;">
+      <b>⬇ 1라인가 하향 도우미</b>
+      <label>현재가</label><input id="ra_p_${i}" style="width:70px" value="${esc(_priceBySheet[(_sheets[i]||{}).name] ?? '')}">
+      <label>보유량</label><input id="ra_q_${i}" style="width:70px">
+      <label>평단</label><input id="ra_a_${i}" style="width:70px" placeholder="HTS평단">
+      <label>예수금</label><input id="ra_c_${i}" style="width:80px" placeholder="0">
+      <button class="ghost" onclick="reanchorCalc(${i})">후보 계산</button>
+    </div>
+    <div id="ra_out_${i}"></div>
     <table class="lntab full"><tr><th>라인</th><th>시드%</th><th>매수%</th><th>매도%</th>
       <th>잔고량</th><th>투자금</th><th>평단</th><th>매수가</th><th>매수량</th><th>매도가</th><th>매도량</th></tr>${rows}</table>`;
   box.classList.remove('hidden');
@@ -621,6 +630,74 @@ function recalcLines(i){
     set('sp',  r.sell_price.toFixed(2));
     set('sq',  r.sell_qty);
   }
+}
+
+// ── 1라인가 하향 도우미 — 바닥 이탈 시 새 1라인가 후보와 즉시 일어날 일 계산 ──
+// 각 층 L에 대해 '현재가가 그 층 밴드 중앙에 오는' 새 1라인가를 만들고,
+// 봇(stateless)이 다음 사이클에 할 조정(매도/매수/없음)과 실현손익을 미리 보여준다.
+function reanchorCalc(i){
+  const box=$('lnpanel'); if(!box || box.dataset.open!==String(i)) return;
+  const total=parseInt(box.dataset.total)||0;
+  const out=$('ra_out_'+i); if(!out) return;
+  const P=parseFloat($('ra_p_'+i).value)||0;
+  const Q=parseInt($('ra_q_'+i).value)||0;
+  const AVG=parseFloat($('ra_a_'+i).value)||0;
+  const C=parseFloat($('ra_c_'+i).value)||0;
+  if(!(P>0) || !(Q>0)){ out.innerHTML='<div class="row" style="color:#e0a106;">현재가·보유량을 입력하세요. (평단은 손실 추정용, 예수금은 매수 가능성 확인용)</div>'; return; }
+  const ls=[]; for(let L=1;L<=total;L++) ls.push({ line:L,
+    seed_pct:parseFloat($('ln_'+i+'_'+L+'_s').value)||0,
+    buy_pct:parseFloat($('ln_'+i+'_'+L+'_b').value)||0,
+    sell_pct:parseFloat($('ln_'+i+'_'+L+'_x').value)||0 });
+  const seed=parseFloat($('sh_seed_'+i).value)||0;
+  const oldF=parseFloat($('sh_fp_'+i).value)||0;
+  // 평단 배율 k[L] (1라인가=1 기준, 라운딩 없이)
+  const k={1:1};
+  for(let L=2;L<=total+1;L++) k[L]=k[L-1]*(1+(Number(lineSettingAt(ls,L).buy_pct)||0)/100);
+
+  const cands=[];
+  for(let L=1;L<=total;L++){
+    const s=lineSettingAt(ls,L);
+    const lo=k[L+1]||0;                                  // 매수가[L] (F'=1)
+    const hi=k[L]*(1+(Number(s.sell_pct)||0)/100);       // 매도가[L] (F'=1)
+    if(!(lo>0&&hi>lo)) continue;
+    const Fp=Math.round(P/Math.sqrt(lo*hi)*100)/100;     // 현재가가 밴드 중앙(기하평균)
+    if(!(Fp>0) || (oldF>0 && Fp>=oldF)) continue;        // 하향만
+    const comp=computeSheetJS({seed_amount:seed,total_lines:total,first_buy_price:Fp,line_settings:ls});
+    if(!comp.length) continue;
+    // 봇과 동일: 보유량→현재층(잔고량 최근접), 현재가→목표층(트리거 통과)
+    let cur=0,bd=1e18;
+    comp.forEach(r=>{const d=Math.abs(r.balance_qty-Q); if(d<bd){bd=d;cur=r.line;}});
+    let t=cur;
+    if(t<total && comp[t].buy_price>0 && P<=comp[t].buy_price){
+      while(t<total && comp[t].buy_price>0 && P<=comp[t].buy_price) t++;
+    } else if(t>0 && comp[t].sell_price>0 && P>=comp[t].sell_price){
+      while(t>0 && comp[t].sell_price>0 && P>=comp[t].sell_price) t--;
+    }
+    const diff=Q-comp[t].balance_qty;                    // >0=조정매도, <0=조정매수
+    cands.push({L,Fp,cur,t,tgt:comp[t].balance_qty,diff});
+  }
+  if(!cands.length){ out.innerHTML='<div class="row">후보 없음 — 현재가/설정을 확인하세요.</div>'; return; }
+  const money=v=>`$${fmtUSD(v)}`;
+  const rowsH=cands.map(c=>{
+    let act='없음', pl='-', cash='-', warn='';
+    if(c.diff>0){
+      act=`<b class="loss">매도 ${c.diff}주</b>`;
+      if(AVG>0){ const p=c.diff*(P-AVG); pl=`<b class="${p>=0?'gain':'loss'}">${money(p)}</b>`; }
+      cash=`+${money(c.diff*P)}`;
+    } else if(c.diff<0){
+      const need=(-c.diff)*P;
+      act=`매수 ${-c.diff}주`;
+      cash=`-${money(need)}`;
+      if(C>0 && need>C) warn=' <span class="loss">(예수금 부족→부분매수)</span>';
+      else if(!(C>0)) warn=' <span style="color:#e0a106;">(예수금 확인)</span>';
+    }
+    const nice=Math.abs(c.diff)<=Math.max(2, Q*0.03) ? ' style="background:#15251a;"' : '';
+    return `<tr${nice}><td>${c.L}층</td><td><b>${c.Fp.toFixed(2)}</b></td><td>${c.cur}→${c.t}층</td>
+      <td>${c.tgt}주</td><td>${act}${warn}</td><td>${pl}</td><td>${cash}</td></tr>`;
+  }).join('');
+  out.innerHTML=`
+    <div class="row" style="margin:6px 0;color:#8fcfa3;">새 1라인가를 고르면(초록 행=조정 최소) 봇이 다음 사이클에 표의 조정을 자동 실행하고 계속 매매합니다. 적용: 위 '1라인가'에 입력 → 저장(원격→PC).</div>
+    <table class="lntab full"><tr><th>현재가 위치</th><th>새 1라인가</th><th>층 이동</th><th>목표 잔고</th><th>즉시 조정</th><th>실현손익(평단 기준)</th><th>현금 변화</th></tr>${rowsH}</table>`;
 }
 
 // 총라인수가 바뀌면 편집기 행을 다시 생성(현재 편집값은 보존).
