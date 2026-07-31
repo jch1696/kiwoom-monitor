@@ -772,7 +772,7 @@ function statusCard(d){
         <span class="act ${esc(d.action)}">${esc(d.action)}</span>
         <span class="tag ${isOn?'live':'preview'}">${isOn?'활성':'비활성'}</span></div>
       <div class="row">${esc(d.task||'')} · ${esc(d.reason||'')}</div>
-      ${d.price!=null?`<div class="row">현재가 ${esc(d.price)} · 보유 ${esc(d.balance)} · 예수금 $${esc(d.usd)}</div>`:''}
+      ${d.price!=null?`<div class="row">현재가 ${esc(d.price)} · 보유 ${esc(d.balance)} · 주문가능 $${esc(d.usd)}</div>`:''}
       ${d.open_orders!=null?`<div class="row">미체결 ${esc(d.open_orders)}건 · 계좌 ${esc(d.account)}</div>`:''}
       <div class="ts">${esc(fmtTime(d.ts))}</div>
       ${d.agent_id&&d.sheet?`<div class="cmds">
