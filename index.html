@@ -126,7 +126,7 @@
     <div class="bar">
       <span id="who" class="row"></span>
       <button class="ghost" onclick="logout()">로그아웃</button>
-      <button class="ghost" onclick="refresh()">새로고침</button>
+      <button class="ghost" onclick="refresh(true)">새로고침</button>
       <button class="ghost" onclick="toggleSrvApp()">⚙ 서버</button>
       <label style="font-size:13px"><input type="checkbox" id="auto" checked> 10초 자동</label>
     </div>
@@ -150,6 +150,7 @@
       <div id="agents" class="grid"></div>
       <h2>작업 현재 상태</h2>
       <div id="status"></div>
+      <div id="switch_mirror"></div>
     </div>
 
     <div class="tabpane hidden" data-pane="sheets">
@@ -318,7 +319,7 @@ async function apiAll(pathBase){
   return all;
 }
 
-async function refresh(){
+async function refresh(force){
   $('msg').textContent='';
   try {
     const [agents, status, orders, commands] = await Promise.all([
@@ -333,10 +334,16 @@ async function refresh(){
     catch(e){ $('sheets').innerHTML = '<div class="row">시트 테이블 없음 — schema.sql의 sheets 테이블을 Supabase에 추가하세요.</div>'; }
     try { renderSettlements(await api('settlements?select=*&order=date.desc,sheet.asc&limit=300')); }
     catch(e){ $('settlements').innerHTML = '<div class="row">정산 테이블 없음 — schema.sql의 settlements 테이블을 Supabase에 추가하세요.</div>'; }
-    try { renderPnl(await apiAll('trades?select=*&order=date.desc,created_at.desc')); }
-    catch(e){ $('pnl_table').innerHTML = '<div class="row">손익(trades) 테이블 없음 — schema.sql의 trades 테이블을 Supabase에 추가하세요.</div>'; }
+    // 거래(trades)는 수천 건이라 10초마다 다시 받으면 느려짐 → 최초 1회 + 강제 새로고침·일괄변경 때만.
+    if(!_tradesLoaded || force){
+      try { renderPnl(await apiAll('trades?select=*&order=date.desc,created_at.desc')); _tradesLoaded = true; }
+      catch(e){ $('pnl_table').innerHTML = '<div class="row">손익(trades) 테이블 없음 — schema.sql의 trades 테이블을 Supabase에 추가하세요.</div>'; }
+    }
   } catch(e){ if(String(e.message)!=='401') $('msg').textContent='오류: '+e.message; }
 }
+let _tradesLoaded = false;
+let _pnlLimit = 300;                 // 거래표에 그릴 최대 행수(성능)
+function pnlShowMore(){ _pnlLimit += 1000; drawPnl(); }
 
 function uuid(){
   try { return crypto.randomUUID(); } catch(e){ return 'k'+Math.random().toString(16).slice(2)+'_'+new Date().getTime(); }
@@ -518,8 +525,12 @@ async function deleteAgent(agentId, nick){
 // ── 시트 설정 원격 편집 ──────────────────────────────────────
 let _sheets = {};
 function renderSheets(rows){
-  _sheets = {}; _lastSheets = rows||[];
-  const ordered = (rows||[]).slice().sort((a,b)=> sheetCmp(a.name, b.name));   // 사용자 지정 순서
+  rows = rows || [];
+  // '__' 로 시작하는 행은 시트 설정이 아니라 내부 데이터(스위치 시트 미러)
+  renderSwitchMirror(rows.filter(r => String(r.name||'').startsWith('__switch__')));
+  rows = rows.filter(r => !String(r.name||'').startsWith('__'));
+  _sheets = {}; _lastSheets = rows;
+  const ordered = rows.slice().sort((a,b)=> sheetCmp(a.name, b.name));   // 사용자 지정 순서
   const html = ordered.map((s,i) => {
     const p = s.payload || {};
     _sheets[i] = { name: s.name, payload: p, version: s.version||1 };
@@ -600,6 +611,44 @@ function toggleLines(i){
   recalcLines(i);                              // 계산 컬럼 채우기
 }
 function closeLines(){ const b=$('lnpanel'); b.classList.add('hidden'); b.dataset.open=''; b.innerHTML=''; }
+
+// ── 스위치 시트 미러 — 구글시트를 열지 않고 모니터에서 확인(봇이 5분마다 올림) ──
+function _mirrorLadder(title, sells, buys){
+  const n = Math.max(sells.length, buys.length);
+  if(!n) return '';
+  let body = '';
+  for(let i=0;i<n;i++){
+    const s = sells[i], b = buys[i];
+    body += `<tr><td>${s?('$'+fmtUSD(s.price)):''}</td><td>${s?s.qty+'주':''}</td>
+      <td>${b?('$'+fmtUSD(b.price)):''}</td><td>${b?b.qty+'주':''}</td></tr>`;
+  }
+  return `<div style="margin:8px 12px 0 0;">
+    <div class="row" style="font-weight:700;color:#cfd3da;">${esc(title)}</div>
+    <table class="lntab"><tr><th colspan="2">매도</th><th colspan="2">매수</th></tr>${body}</table></div>`;
+}
+function renderSwitchMirror(rows){
+  const box = $('switch_mirror'); if(!box) return;
+  if(!rows || !rows.length){ box.innerHTML=''; return; }
+  box.innerHTML = rows.map(r => {
+    const p = r.payload || {};
+    const g = p.grid || [], L = p.ladder || {};
+    const grid = g.map((row,ri) => '<tr>' + row.map(c => {
+      const t = String(c||'').trim();
+      const head = ri===0 || /현황$|^Cycle$|^Symbol$/.test(t);
+      return `<td${head?' style="color:#9AA0A6"':''}>${esc(t)}</td>`;
+    }).join('') + '</tr>').join('');
+    const total = ['updown_buys','updown_sells','tteol_buys','tteol_sells']
+      .reduce((a,k)=>a+((L[k]||[]).length),0);
+    return `<div class="card" style="margin-top:10px;">
+      <div class="sym">🔀 ${esc(p._task || r.name)} — 시트 미러
+        <span class="row">예약주문 ${total}건 · ${esc(fmtTime(p._ts))}</span></div>
+      <div style="overflow:auto;max-height:340px;"><table class="lntab">${grid}</table></div>
+      <div style="display:flex;flex-wrap:wrap;">
+        ${_mirrorLadder('업다운', L.updown_sells||[], L.updown_buys||[])}
+        ${_mirrorLadder('떨사오팔', L.tteol_sells||[], L.tteol_buys||[])}
+      </div></div>`;
+  }).join('');
+}
 
 // 편집 중인 값으로 층별 계산 컬럼(잔고량·매수가·매수량·매도가·매도량…) 실시간 갱신.
 function recalcLines(i){
@@ -1107,7 +1156,9 @@ function drawPnl(){
   }).join('');
   $('pnl_summary').innerHTML = cards || '<div class="row">입력된 거래 없음 — 아래에서 매수/매도를 추가하세요.</div>';
   // ── 거래 표(필터 적용, 최신순) ──
-  let rows = _trades.filter(t => (!fs||t.sheet===fs));
+  const all = _trades.filter(t => (!fs||t.sheet===fs));
+  // 수천 행을 한 번에 그리면 브라우저가 느려짐 → 최신 N건만 표시(요약·월별은 전체 기준)
+  const rows = all.slice(0, _pnlLimit);
   const head = `<table><tr><th>날짜</th><th>시트</th><th>Tier</th><th>구분</th><th>체결단가</th>
     <th>수량</th><th>수수료</th><th>거래금액</th><th>수익금</th><th></th></tr>`;
   const body = rows.map(t=>{
@@ -1125,8 +1176,10 @@ function drawPnl(){
       <td><button class="delx" onclick="delTrade('${esc(t.id)}')">삭제</button></td>
     </tr>`;
   }).join('');
-  if($('pnl_count')) $('pnl_count').textContent = `${rows.length}건${fs?' (필터)':''}`;
-  $('pnl_table').innerHTML = head + (body || '<tr><td colspan="10" class="row">거래 없음</td></tr>') + '</table>';
+  if($('pnl_count')) $('pnl_count').textContent =
+    `${all.length}건${fs?' (필터)':''}` + (all.length > rows.length ? ` · 최근 ${rows.length}건 표시` : '');
+  $('pnl_table').innerHTML = head + (body || '<tr><td colspan="10" class="row">거래 없음</td></tr>') + '</table>'
+    + (all.length > rows.length ? `<button class="ghost" style="margin-top:8px" onclick="pnlShowMore()">더 보기 (남은 ${all.length-rows.length}건)</button>` : '');
 }
 // 전체 투입원금(월/년 수익률 분모) — 설정값 우선, 없으면 시트 투입원금 합계.
 function sumSeeds(sheets){ return sheets.reduce((a,s)=>a+(sheetSeed(s)||0),0); }
@@ -1208,8 +1261,10 @@ async function addTrade(){
     });
     if(!r.ok){ $('pnl_msg').textContent = `추가 실패 ${r.status}: ${await r.text()}`; return; }
     $('pnl_msg').textContent = `추가됨 (${sheet} ${date} T${tier} ${row.side==='sell'?'매도':'매수'}).`;
-    pPersist();                  // 시트·종목·날짜·Tier·Cycle·구분 유지(반복입력 방지) — 값 안 지움
-    refresh();
+    pPersist();                  // 시트·날짜·Tier·구분 유지(반복입력 방지) — 값 안 지움
+    // ★전체 재조회(수천 건) 대신 로컬에 추가하고 손익만 다시 그림 — 입력이 즉시 끝남
+    _trades.unshift({...row, id:'tmp_'+uuid(), created_at:new Date().toISOString()});
+    drawPnl();
   } catch(e){ $('pnl_msg').textContent = '추가 오류: '+e; }
 }
 async function delTrade(id){
@@ -1219,7 +1274,8 @@ async function delTrade(id){
       method:'DELETE',
       headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, Prefer:'return=minimal' }
     });
-    refresh();
+    _trades = _trades.filter(t => String(t.id) !== String(id));   // 로컬 반영(전체 재조회 안 함)
+    drawPnl();
   } catch(e){ $('pnl_msg').textContent = '삭제 오류: '+e; }
 }
 // 일괄 삭제 — 필터(시트/Cycle)에 맞는 거래 전부, 또는 전체.
@@ -1228,7 +1284,7 @@ async function delByQuery(q){
     const r = await fetch(`${URL_}/rest/v1/${q}`, { method:'DELETE',
       headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, Prefer:'return=minimal' } });
     if(!r.ok){ $('pnl_msg').textContent=`삭제 실패 ${r.status}: ${await r.text()}`; return; }
-    $('pnl_msg').textContent='삭제 완료.'; refresh();
+    $('pnl_msg').textContent='삭제 완료.'; refresh(true);
   } catch(e){ $('pnl_msg').textContent='삭제 오류: '+e; }
 }
 async function delTradesFiltered(){
@@ -1337,7 +1393,7 @@ async function importFile(ev){
     for(const b of batches){ done += await insertTrades(b.rows, done, total); }
     $('imp_msg').textContent=`완료: ${done}건 업로드.`;
     if($('imp_file')) $('imp_file').value='';
-    refresh();
+    refresh(true);
   } catch(e){ $('imp_msg').textContent='업로드 오류: '+(e&&e.message||e); }
 }
 async function insertTrades(rows, baseDone, total){
