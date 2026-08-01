@@ -917,11 +917,15 @@ function computeTradeProfits(trades){
       lots[k].push({ qty:q, unit: q? (price*q+fee)/q : price });   // 주당 매수원가(수수료 포함)
     } else {
       const sellUnit = q? (price*q-fee)/q : price;                 // 주당 매도순액(수수료 차감)
+      // ★최근 매수 우선(LIFO). 그리드는 그 층에서 사서 그 층에서 되파는 왕복이라
+      //   '방금 산 것'과 짝지어야 맞다. 예전엔 FIFO 라 수년 전 남은 싼 물량과 매칭돼
+      //   수익이 부풀려졌다(예: T37 매도 $95.20 ↔ 1년 전 $17.40 → +$1,244).
+      //   수량이 맞아떨어지는 구간에서는 FIFO 와 결과가 같다(과거 검증값 유지).
       let remain=q, cst=0, matched=0;
       while(remain>0 && lots[k].length){
-        const lot=lots[k][0]; const take=Math.min(remain, lot.qty);
+        const lot=lots[k][lots[k].length-1]; const take=Math.min(remain, lot.qty);
         cst += take*lot.unit; matched += take; lot.qty -= take; remain -= take;
-        if(lot.qty<=0) lots[k].shift();
+        if(lot.qty<=0) lots[k].pop();
       }
       proceeds[t.id] = sellUnit*matched;
       cost[t.id] = cst;
