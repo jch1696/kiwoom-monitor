@@ -447,7 +447,8 @@ function _allSheetNames(){
   const a = _trades.map(t=>t.sheet).filter(Boolean);
   const b = Object.values(_sheets||{}).map(s=>s&&s.name).filter(Boolean);
   const c = Object.keys(_pcKeyBySheet||{});        // 모니터에 보이는 시트명
-  return [...new Set([...a,...b,...c])];
+  const d = (typeof _switchPnl!=='undefined' ? _switchPnl : []).map(p=>p.sheet).filter(Boolean);
+  return [...new Set([...a,...b,...c,...d])];      // 스위치 그룹도 순서 편집 대상
 }
 function moveSheet(name, dir){               // 현재 순서에서 한 칸 이동 → 전체 순서 저장
   const all = sheetSort(_allSheetNames());
@@ -1125,6 +1126,25 @@ function applyMonthlyState(){
   const open=lget('pnl_monthly_open','0')==='1';
   box.classList.toggle('hidden', !open); applyMonthlyBtn(open);
 }
+// 스위치 요약 카드 — 시트가 계산한 실현손익 그대로(우리 LIFO 재계산 안 함)
+function switchCard(sh, rs, todayMs, pctSpan){
+  const sum = rs.reduce((a,p)=>a+p.profit,0);
+  const start = rs.map(p=>p.date).filter(Boolean).sort()[0] || '';
+  const days = start? Math.max(1,(todayMs - Date.parse(start))/86400000) : 0;
+  const seed = sheetSeed(sh);
+  const ret = seed? (sum/seed*100):null;
+  const annRet = (ret!=null && days)? ret*365/days : null;
+  const shx = esc(sh).replace(/'/g,'');
+  const k = pcKeyForSheetName(sh);
+  return `<div class="card" style="background:${pcBg(k)};border-left:6px solid ${pcAccent(k)};">
+    <div class="sym">🔀 ${esc(sh)} <span class="row">스위치</span></div>
+    <div class="row">시작 ${start||'-'}</div>
+    <div class="row">매도 ${rs.length}회 (시트 계산 손익)</div>
+    <div class="row">총 수익금 <b class="${sum>=0?'gain':'loss'}">$${fmtUSD(sum)}</b></div>
+    <div class="row">투입원금 <input class="seedin" value="${seed||''}" placeholder="설정" onchange="setSeed('${shx}',this.value)"></div>
+    <div class="row">누적수익률 ${pctSpan(ret)} · 연수익률 ${pctSpan(annRet)}</div>
+  </div>`;
+}
 function drawPnl(){
   const n2=v=>(v==null?'':Number(v).toFixed(2));
   const fs = $('p_filter_sheet')?$('p_filter_sheet').value:'';
@@ -1137,7 +1157,11 @@ function drawPnl(){
   _trades.forEach(t=>{ (bySheet[t.sheet]=bySheet[t.sheet]||[]).push(t); });
   const todayMs = Date.now();
   const pctSpan = v => v==null?'-':('<b class="'+(v>=0?'gain':'loss')+'">'+v.toFixed(2)+'%</b>');
-  const cards = sheetSort(Object.keys(bySheet)).map(sh=>{
+  const swBy = {};
+  _switchPnl.forEach(p => { (swBy[p.sheet]=swBy[p.sheet]||[]).push(p); });
+  // 일반 시트 + 스위치 그룹을 한 목록으로 정렬 → '시트 순서'로 위치를 함께 조정
+  const cards = sheetSort([...Object.keys(bySheet), ...Object.keys(swBy)]).map(sh=>{
+    if(swBy[sh]) return switchCard(sh, swBy[sh], todayMs, pctSpan);
     const ts = bySheet[sh];
     const sells = ts.filter(t=>t.side==='sell');
     const sum = sells.reduce((acc,t)=>acc+(profit[t.id]||0),0);
@@ -1166,29 +1190,7 @@ function drawPnl(){
       <div class="row">누적수익률 ${pctSpan(ret)} · 연수익률 ${pctSpan(annRet)}</div>
     </div>`;
   }).join('');
-  // ── 스위치 요약 카드(시트 계산 손익 그대로) ──
-  const swBy = {};
-  _switchPnl.forEach(p => { (swBy[p.sheet]=swBy[p.sheet]||[]).push(p); });
-  const swCards = Object.keys(swBy).sort().map(sh=>{
-    const rs = swBy[sh];
-    const sum = rs.reduce((a,p)=>a+p.profit,0);
-    const dates = rs.map(p=>p.date).filter(Boolean).sort();
-    const start = dates[0]||'';
-    const days = start? Math.max(1,(todayMs - Date.parse(start))/86400000) : 0;
-    const seed = sheetSeed(sh);
-    const ret = seed? (sum/seed*100):null;
-    const annRet = (ret!=null && days)? ret*365/days : null;
-    const shx = esc(sh).replace(/'/g,'');
-    return `<div class="card" style="background:#161f1a;border-left:6px solid #2f6b4f;">
-      <div class="sym">🔀 ${esc(sh)} <span class="row">스위치</span></div>
-      <div class="row">시작 ${start||'-'}</div>
-      <div class="row">매도 ${rs.length}회 (시트 계산 손익)</div>
-      <div class="row">총 수익금 <b class="${sum>=0?'gain':'loss'}">$${fmtUSD(sum)}</b></div>
-      <div class="row">투입원금 <input class="seedin" value="${seed||''}" placeholder="설정" onchange="setSeed('${shx}',this.value)"></div>
-      <div class="row">누적수익률 ${pctSpan(ret)} · 연수익률 ${pctSpan(annRet)}</div>
-    </div>`;
-  }).join('');
-  $('pnl_summary').innerHTML = (cards + swCards) ||
+  $('pnl_summary').innerHTML = cards ||
     '<div class="row">입력된 거래 없음 — 아래에서 매수/매도를 추가하세요.</div>';
   // ── 거래 표(필터 적용, 최신순) ──
   const all = _trades.filter(t => (!fs||t.sheet===fs));
@@ -1258,8 +1260,11 @@ function _periodTable(labelCol, periodMap, sheets, principalOf, repDateOf, curPr
 }
 function renderMonthly(R){
   const box=$('pnl_monthly'); if(!box) return;
-  const sheets=sheetSort([...new Set(_trades.filter(t=>t.side==='sell').map(t=>t.sheet).filter(Boolean))])
-    .concat([...new Set((_switchPnl||[]).map(p=>p.sheet))].sort());   // 스위치는 뒤에 붙임
+  // 일반 시트 + 스위치 그룹을 '시트 순서' 설정대로 정렬(열 위치도 함께 이동)
+  const sheets=sheetSort([...new Set([
+    ..._trades.filter(t=>t.side==='sell').map(t=>t.sheet).filter(Boolean),
+    ...(_switchPnl||[]).map(p=>p.sheet).filter(Boolean),
+  ])]);
   const byMonth={}, byYear={};
   const addPnl=(sheet,date,p)=>{
     const mo=(date||'').slice(0,7), yr=(date||'').slice(0,4);
