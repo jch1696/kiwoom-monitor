@@ -448,7 +448,9 @@ function _allSheetNames(){
   const b = Object.values(_sheets||{}).map(s=>s&&s.name).filter(Boolean);
   const c = Object.keys(_pcKeyBySheet||{});        // 모니터에 보이는 시트명
   const d = (typeof _switchPnl!=='undefined' ? _switchPnl : []).map(p=>p.sheet).filter(Boolean);
-  return [...new Set([...a,...b,...c,...d])];      // 스위치 그룹도 순서 편집 대상
+  // 스위치 그룹(업다운/떨사오팔)은 순서 편집 대상. 단, 모니터 상태카드용 '스위치 <티커>'
+  // 이름은 손익/시트설정에 안 나오는 중복 항목이라 칩에서 제외.
+  return [...new Set([...a,...b,...c,...d])].filter(n => !/^스위치\s/.test(n));
 }
 function moveSheet(name, dir){               // 현재 순서에서 한 칸 이동 → 전체 순서 저장
   const all = sheetSort(_allSheetNames());
