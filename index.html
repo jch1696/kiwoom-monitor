@@ -836,7 +836,7 @@ function statusCard(d){
       ${d.open_orders!=null?`<div class="row">미체결 ${esc(d.open_orders)}건 · 계좌 ${esc(d.account)}</div>`:''}
       <div class="ts">${esc(fmtTime(d.ts))}</div>
       ${d.agent_id&&d.sheet?`<div class="cmds">
-        <button class="runnow" onclick="sendCmd('${esc(d.agent_id)}','run_now',{sheet:'${esc(d.sheet)}'})">즉시 실행</button>
+        <button class="runnow" onclick="sendCmd('${esc(d.agent_id)}','run_now',{sheet:'${esc(d.sheet)}',nickname:'${esc(d.task||'').replace(/'/g,'')}'})">즉시 실행</button>
         <button class="${isOn?'toggle-off':'toggle-on'}" onclick="sendCmd('${esc(d.agent_id)}','set_active',{sheet:'${esc(d.sheet)}',active:${!isOn}})">${isOn?'비활성화':'활성화'}</button>
       </div>`:''}
     </div>`;
