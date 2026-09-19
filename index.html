@@ -39,6 +39,12 @@
   .tag { padding:1px 6px; border-radius:5px; font-size:11px; }
   .live { background:#1e6b34; }
   .preview { background:#444; color:#cfcfcf; }
+  .alerts { display:flex; flex-direction:column; gap:6px; margin:0 0 10px; }
+  .al { padding:8px 12px; border-radius:8px; font-size:13px; font-weight:600; }
+  .al.crit { background:#3a1414; border:1px solid #8a1f1f; color:#ffb3b3; }
+  .al.warn { background:#3a2e10; border:1px solid #a67c1a; color:#ffe2a3; }
+  .tabs { overflow-x:auto; white-space:nowrap; -webkit-overflow-scrolling:touch; }
+  #orders, #commands, #settlements, #pnl_table, #switch_mirror { overflow-x:auto; }
   .hidden { display:none; }
   .cmds { margin-top:10px; display:flex; gap:6px; flex-wrap:wrap; }
   .cmds button { padding:5px 10px; font-size:12px; }
@@ -128,7 +134,7 @@
       <button class="ghost" onclick="logout()">로그아웃</button>
       <button class="ghost" onclick="refresh(true)">새로고침</button>
       <button class="ghost" onclick="toggleSrvApp()">⚙ 서버</button>
-      <label style="font-size:13px"><input type="checkbox" id="auto" checked> 10초 자동</label>
+      <label style="font-size:13px"><input type="checkbox" id="auto" checked> 자동 갱신</label>
     </div>
     <div id="srvapp" class="hidden srvbox">
       <span class="row">Supabase 연결 (보통 그대로 두세요)</span>
@@ -136,6 +142,8 @@
       <input id="srv_key" placeholder="anon key" size="28" type="password">
       <button onclick="saveServer()">저장</button>
     </div>
+
+    <div id="alerts" class="alerts hidden"></div>
 
     <div class="tabs">
       <button class="tab active" data-tab="monitor" onclick="showTab('monitor')">📊 모니터</button>
@@ -256,7 +264,9 @@ window.onload = () => {
   if (!u0 || !k0) $('srvbox').classList.remove('hidden');
   const tok = lget('token');
   if (u0 && k0 && tok) { URL_=u0; KEY_=k0; TOKEN_=tok; showApp(); refresh(); }
-  setInterval(() => { if (!$('app').classList.contains('hidden') && $('auto').checked) refresh(); }, 10000);
+  // 탭이 안 보일 땐 쉬고(모바일 배터리·요청 절약), 다시 보이면 즉시 갱신
+  setInterval(() => { if (!document.hidden && !$('app').classList.contains('hidden') && $('auto').checked) refresh(); }, 10000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !$('app').classList.contains('hidden')) refresh(); });
 };
 function toggleServer(){ $('srvbox').classList.toggle('hidden'); }
 function toggleSrvApp(){
@@ -296,7 +306,12 @@ function showApp(){ $('loginBox').classList.add('hidden'); $('app').classList.re
 function showTab(name){
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab===name));
   document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('hidden', p.dataset.pane!==name));
+  if (!$('app').classList.contains('hidden')) refresh();   // 그 탭에 필요한 데이터만 받아옴(변경 없으면 그리지 않음)
 }
+function activeTab(){ const b=document.querySelector('.tab.active'); return b ? b.dataset.tab : 'monitor'; }
+// 변경 감지: 같은 내용이면 다시 그리지 않는다(10초마다 전체 DOM 재생성 → 깜빡임·CPU 낭비 제거)
+const _cache = {};
+function changed(key, rows){ const sig = JSON.stringify(rows); if (_cache[key] === sig) return false; _cache[key] = sig; return true; }
 
 async function api(path){
   const r = await fetch(`${URL_}/rest/v1/${path}`, {
@@ -321,26 +336,71 @@ async function apiAll(pathBase){
 
 async function refresh(force){
   $('msg').textContent='';
+  const tab = activeTab();
   try {
-    const [agents, status, orders, commands] = await Promise.all([
+    // 항상: PC·작업 상태(가벼움) — 문제 배너와 모니터 탭의 재료
+    const [agents, status] = await Promise.all([
       api('agents?select=*&order=nickname.asc,agent_id.asc'),
       api('bot_status?select=*&order=agent_id.asc,sheet.asc'),
-      api('orders?select=*&order=ts.desc&limit=100'),
-      api('commands?select=*&order=created_at.desc&limit=20'),
     ]);
-    renderAgents(agents); renderStatus(status); renderOrders(orders); renderCommands(commands);
-    // sheets/settlements 테이블은 없을 수도 있어(스키마 미적용) 별도 try — 전체가 안 깨지게.
-    try { renderSheets(await api('sheets?select=*&order=name')); }
-    catch(e){ $('sheets').innerHTML = '<div class="row">시트 테이블 없음 — schema.sql의 sheets 테이블을 Supabase에 추가하세요.</div>'; }
-    try { renderSettlements(await api('settlements?select=*&order=date.desc,sheet.asc&limit=300')); }
-    catch(e){ $('settlements').innerHTML = '<div class="row">정산 테이블 없음 — schema.sql의 settlements 테이블을 Supabase에 추가하세요.</div>'; }
-    // 거래(trades)는 수천 건이라 10초마다 다시 받으면 느려짐 → 최초 1회 + 강제 새로고침·일괄변경 때만.
-    if(!_tradesLoaded || force){
+    const aCh = changed('agents', agents), sCh = changed('status', status);
+    if (aCh || force) renderAgents(agents);
+    if (sCh || aCh || force) renderStatus(status);
+    renderAlerts(agents, status);
+    // 탭별: 보이는 탭 것만(강제 새로고침이면 전부)
+    if (tab === 'logs' || force){
+      const [orders, commands] = await Promise.all([
+        api('orders?select=*&order=ts.desc&limit=100'),
+        api('commands?select=*&order=created_at.desc&limit=20'),
+      ]);
+      if (changed('orders', orders) || force) renderOrders(orders);
+      if (changed('commands', commands) || force) renderCommands(commands);
+    }
+    if (tab === 'monitor' || tab === 'sheets' || tab === 'pnl' || force){
+      // sheets/settlements 테이블은 없을 수도 있어(스키마 미적용) 별도 try — 전체가 안 깨지게.
+      try { const sheets = await api('sheets?select=*&order=name'); if (changed('sheets', sheets) || force) renderSheets(sheets); }
+      catch(e){ $('sheets').innerHTML = '<div class="row">시트 테이블 없음 — schema.sql의 sheets 테이블을 Supabase에 추가하세요.</div>'; }
+    }
+    if (tab === 'settle' || force){
+      try { const st = await api('settlements?select=*&order=date.desc,sheet.asc&limit=300'); if (changed('settlements', st) || force) renderSettlements(st); }
+      catch(e){ $('settlements').innerHTML = '<div class="row">정산 테이블 없음 — schema.sql의 settlements 테이블을 Supabase에 추가하세요.</div>'; }
+    }
+    // 거래(trades)는 수천 건이라 최초 1회 + 강제 새로고침·일괄변경 때만.
+    if ((tab === 'pnl' && !_tradesLoaded) || force){
       try { renderPnl(await apiAll('trades?select=*&order=date.desc,created_at.desc')); _tradesLoaded = true; }
       catch(e){ $('pnl_table').innerHTML = '<div class="row">손익(trades) 테이블 없음 — schema.sql의 trades 테이블을 Supabase에 추가하세요.</div>'; }
     }
   } catch(e){ if(String(e.message)!=='401') $('msg').textContent='오류: '+e.message; }
 }
+
+// ── 문제 배너: 지금 봐야 할 것만 상단에 고정(정상이면 숨김) ─────────────────
+const ALERT_MAX_AGE_MS = 6*3600*1000;      // 6시간 지난 오류는 배너에 안 올림(기록 탭에서 확인)
+function renderAlerts(agents, status){
+  const box = $('alerts'); if (!box) return;
+  const items = [];
+  (agents||[]).forEach(a => {
+    const name = a.nickname || a.agent_id || 'PC';
+    const st = freshness(a.last_seen_at, a.heartbeat_interval_sec);
+    if (a.running && st !== 'online')
+      items.push({ lv: st==='stale' ? 'warn' : 'crit',
+                   txt: `${name} PC 신호 ${st==='stale'?'지연':'끊김'} — 마지막 ${fmtTimeShort(a.last_seen_at)}` });
+    if (a.last_error) items.push({ lv:'crit', txt:`${name}: ${a.last_error}` });
+  });
+  (status||[]).forEach(d => {
+    if (d.active === false) return;
+    if (d.ts && Date.now() - new Date(d.ts).getTime() > ALERT_MAX_AGE_MS) return;
+    const act = String(d.action||''), who = d.task || d.sheet || d.symbol || '';
+    if (/ERROR|SWITCH_FAIL/.test(act)) items.push({ lv:'crit', txt:`${who}: ${act} — ${d.reason||''}` });
+    else if (/BLOCKED/.test(act))     items.push({ lv:'warn', txt:`${who}: 안전검증 차단 — ${d.reason||''}` });
+  });
+  if (!items.length){ box.classList.add('hidden'); box.innerHTML=''; return; }
+  const crit = items.filter(i=>i.lv==='crit'), warn = items.filter(i=>i.lv!=='crit');
+  const show = crit.concat(warn).slice(0, 8);
+  box.classList.remove('hidden');
+  box.innerHTML = show.map(i => `<div class="al ${i.lv}">${i.lv==='crit'?'🔴':'🟡'} ${esc(i.txt)}</div>`).join('')
+    + (items.length > show.length ? `<div class="row">외 ${items.length-show.length}건 — 모니터 탭에서 확인</div>` : '');
+}
+
 let _tradesLoaded = false;
 let _pnlLimit = 300;                 // 거래표에 그릴 최대 행수(성능)
 function pnlShowMore(){ _pnlLimit += 1000; drawPnl(); }
