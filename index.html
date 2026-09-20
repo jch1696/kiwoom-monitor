@@ -91,6 +91,8 @@
   .lchip { display:inline-block; padding:1px 7px; border-radius:6px; font-size:11px; background:#26313f; color:#cfe1ff; font-weight:700; }
   .st { display:inline-flex; align-items:center; gap:5px; font-size:12px; }
   .st i { width:8px; height:8px; border-radius:50%; display:inline-block; }
+  .cash { color:#7fd6b8 !important; font-weight:700; }        /* 예수금 = 민트 */
+  .wd { color:#ffd27a !important; font-weight:700; }          /* 인출가능 = 앰버 */
   .hidden { display:none; }
   .cmds { margin-top:10px; display:flex; gap:6px; flex-wrap:wrap; }
   .cmds button { padding:5px 10px; font-size:12px; }
@@ -1185,18 +1187,18 @@ function drawSettlements(){
     const hist = bySheet[name].slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
     const d = hist[hist.length-1];
     const k = d.agent_id || d.sheet;
-    const br = Number(d.balance_return)||0;
-    const prev = hist.length>1 ? Number(hist[hist.length-2].balance_return)||0 : null;
-    const delta = prev==null ? '' : `<span class="${br-prev>=0?'gain':'loss'}" style="font-size:12px;margin-left:8px">${br-prev>=0?'▲':'▼'} ${Math.abs((br-prev)*100).toFixed(2)}%p</span>`;
-    const sp = sparkSVG(hist.slice(-40).map(x=>({x:x.date, y:+(Number(x.balance_return)*100).toFixed(2)})), {fmt:v=>v.toFixed(2)+'%'});
+    const wd = Number(d.withdrawable)||0;
+    const prev = hist.length>1 ? Number(hist[hist.length-2].withdrawable)||0 : null;
+    const delta = prev==null ? '' : `<span class="${wd-prev>=0?'gain':'loss'}" style="font-size:12px;margin-left:8px">${wd-prev>=0?'▲':'▼'} $${fmtUSD(Math.abs(wd-prev))}</span>`;
+    const sp = sparkSVG(hist.slice(-40).map(x=>({x:x.date, y:+Number(x.withdrawable||0).toFixed(2)})), {fmt:v=>'$'+fmtUSD(v)});
     const chg = Number(d.qty_change)||0;
     return `<div class="card status" style="background:${pcBg(k)};border-left:6px solid ${pcAccent(k)};">
       <div class="chead"><span class="sym">${esc(d.symbol||'')}</span><span class="tier">L${esc(d.tier)}/${esc(d.total_tiers)}</span><span class="row">${esc(name)}</span></div>
-      <div class="big ${br>=0?'gain':'loss'}" style="margin-top:6px">${pctS(br)}${delta}</div>
-      <div class="row" style="margin-top:0">잔고수익 · ${esc(d.date)}</div>
+      <div class="big wd" style="margin-top:6px">$${fmtUSD(wd)}${delta}</div>
+      <div class="row" style="margin-top:0">인출가능 · ${esc(d.date)}</div>
       <div class="kv" style="margin-top:8px">
+        <span>예수금</span><b class="px cash" style="font-size:15px">$${fmtUSD(d.cash)}</b>
         <span>잔고</span><b>${esc(d.balance_qty)}주 <span style="color:${chg>0?'#ff9b9b':chg<0?'#8fc2ff':'#9AA0A6'};font-weight:600">${chg>0?'+':''}${chg||0}</span></b>
-        <span>예수금</span><b class="px">$${fmtUSD(d.cash)}</b>
         <span>주식평가</span><b class="px">$${fmtUSD(d.stock_value)}</b>
         <span>오늘 거래</span><b>매수 ${esc(d.buys)} · 매도 ${esc(d.sells)}</b>
       </div>${sp}</div>`;
@@ -1212,14 +1214,14 @@ function drawSettlements(){
     let html = '';
     if (dates.length >= 2){
       if (fs){
-        const pts = dates.map(dt => { const d=byDate[dt][0]; return {x:dt, y:+(Number(d.balance_return)*100).toFixed(2)}; });
-        html = `<div class="chart"><h3>${esc(fs)} 잔고수익 추이</h3><div class="sub">정산일 기준 · ${dates.length}일</div>${lineSVG(pts,{fmt:v=>v.toFixed(1)+'%'})}</div>`;
+        const pts = dates.map(dt => { const d=byDate[dt][0]; return {x:dt, y:+Number(d.withdrawable||0).toFixed(0)}; });
+        html = `<div class="chart"><h3>${esc(fs)} 인출가능 추이</h3><div class="sub">정산일 기준 · ${dates.length}일</div>${lineSVG(pts,{fmt:v=>'$'+Math.round(v).toLocaleString('en-US')})}</div>`;
       } else {
         const nSheets = names.length;
         const pts = dates.filter(dt => byDate[dt].length === nSheets)   // 모든 시트가 정산된 날만(합계 왜곡 방지)
           .map(dt => ({x:dt, y:+byDate[dt].reduce((a,d)=>a+(Number(d.cash)||0)+(Number(d.stock_value)||0),0).toFixed(0)}));
         if (pts.length >= 2)
-          html = `<div class="chart"><h3>전체 총자산 (예수금 + 주식평가) 추이</h3><div class="sub">시트 ${nSheets}개 모두 정산된 날만 · ${pts.length}일 · 시트 필터를 고르면 잔고수익률로 바뀝니다</div>${lineSVG(pts,{fmt:v=>'$'+Math.round(v).toLocaleString('en-US')})}</div>`;
+          html = `<div class="chart"><h3>전체 총자산 (예수금 + 주식평가) 추이</h3><div class="sub">시트 ${nSheets}개 모두 정산된 날만 · ${pts.length}일 · 시트 필터를 고르면 그 시트의 인출가능 추이로 바뀝니다</div>${lineSVG(pts,{fmt:v=>'$'+Math.round(v).toLocaleString('en-US')})}</div>`;
       }
     }
     cbox.innerHTML = html;
@@ -1230,22 +1232,22 @@ function drawSettlements(){
     ? `<table><tr><th>날짜</th><th>시트</th><th>종목</th><th>티어</th><th>1티어</th><th>잔고(차)</th>
     <th>투자금</th><th>예수금</th><th>주식평가금</th><th>잔고수익</th>
     <th>매수예정</th><th>인출가능</th><th>아바타수익</th><th>매수</th><th>매도</th></tr>`
-    : `<table><tr><th>날짜</th><th>시트</th><th>종목</th><th>티어</th><th>잔고(차)</th><th>예수금</th><th>주식평가</th><th>인출가능</th><th>잔고수익</th><th>매수/매도</th></tr>`;
+    : `<table><tr><th>날짜</th><th>시트</th><th>종목</th><th>티어</th><th>잔고(차)</th><th>예수금</th><th>주식평가</th><th>인출가능</th><th>매수/매도</th></tr>`;
   const body = rows.map(d => { const k = d.agent_id || d.sheet; const br=Number(d.balance_return)||0;
     return detail ? `<tr style="background:${pcBg(k)}">
     <td style="box-shadow:inset 6px 0 0 ${pcAccent(k)}">${esc(d.date)}</td><td>${esc(d.sheet)}</td><td>${esc(d.symbol)}</td>
     <td>${esc(d.tier)}/${esc(d.total_tiers)}T</td><td>${n2(d.tier1_price)}</td>
     <td>${esc(d.balance_qty)}(${esc(d.qty_change)})</td>
-    <td>${n0(d.invest)}</td><td>${n2(d.cash)}</td><td>${n2(d.stock_value)}</td><td class="${br>=0?'gain':'loss'}">${pct(d.balance_return)}</td>
-    <td>${n0(d.planned_buy)}</td><td>${n0(d.withdrawable)}</td><td>${pct(d.avatar_return)}</td>
+    <td>${n0(d.invest)}</td><td class="cash">${n2(d.cash)}</td><td>${n2(d.stock_value)}</td><td class="${br>=0?'gain':'loss'}">${pct(d.balance_return)}</td>
+    <td>${n0(d.planned_buy)}</td><td class="wd">${n0(d.withdrawable)}</td><td>${pct(d.avatar_return)}</td>
     <td>${esc(d.buys)}</td><td>${esc(d.sells)}</td></tr>`
     : `<tr style="background:${pcBg(k)}">
     <td style="box-shadow:inset 6px 0 0 ${pcAccent(k)}">${esc(d.date)}</td><td>${esc(d.sheet)}</td><td>${esc(d.symbol||'')}</td>
     <td>L${esc(d.tier)}/${esc(d.total_tiers)}</td><td>${esc(d.balance_qty)} (${Number(d.qty_change)>0?'+':''}${esc(d.qty_change)})</td>
-    <td class="px">$${fmtUSD(d.cash)}</td><td class="px">$${fmtUSD(d.stock_value)}</td><td class="px">$${fmtUSD(d.withdrawable)}</td>
-    <td class="${br>=0?'gain':'loss'}">${pctS(br)}</td><td>${esc(d.buys)} / ${esc(d.sells)}</td></tr>`; }).join('');
+    <td class="px cash">$${fmtUSD(d.cash)}</td><td class="px">$${fmtUSD(d.stock_value)}</td><td class="px wd">$${fmtUSD(d.withdrawable)}</td>
+    <td>${esc(d.buys)} / ${esc(d.sells)}</td></tr>`; }).join('');
   if($('settle_count')) $('settle_count').textContent = `${rows.length}건${(fs||fy)?' (필터)':''}`;
-  $('settlements').innerHTML = head + (body || `<tr><td colspan="${detail?15:10}" class="row">정산 없음 — 봇이 지정 시각에 자동 기록합니다.</td></tr>`) + '</table>';
+  $('settlements').innerHTML = head + (body || `<tr><td colspan="${detail?15:9}" class="row">정산 없음 — 봇이 지정 시각에 자동 기록합니다.</td></tr>`) + '</table>';
 }
 
 // ── 실현 손익 (수동 입력 거래 → Tier·Cycle FIFO 매칭) ───────────────────────
