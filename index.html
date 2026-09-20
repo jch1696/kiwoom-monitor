@@ -1180,12 +1180,14 @@ function drawSettlements(){
   rows = rows.slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)) || String(a.sheet).localeCompare(String(b.sheet)));
 
   // ── 시트별 최신 정산 카드 + 잔고수익 스파크라인(최근 40일) ──
+  // ★정산의 sheet 는 작업 별명(예: '유라')이라 종목이 여러 개면 겹침 → 별명+종목으로 묶는다
   const bySheet = {};
-  rows.forEach(d => { (bySheet[d.sheet] = bySheet[d.sheet] || []).push(d); });
-  const names = sheetSort(Object.keys(bySheet));
-  const cards = names.map(name => {
-    const hist = bySheet[name].slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
-    const d = hist[hist.length-1];
+  const keyOf = d => `${d.sheet}|${d.symbol||''}`;
+  rows.forEach(d => { (bySheet[keyOf(d)] = bySheet[keyOf(d)] || []).push(d); });
+  const names = Object.keys(bySheet).sort((a,b)=> sheetCmp(a.split('|')[0], b.split('|')[0]) || a.localeCompare(b));
+  const cards = names.map(key => {
+    const hist = bySheet[key].slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+    const d = hist[hist.length-1]; const name = d.sheet;
     const k = d.agent_id || d.sheet;
     const wd = Number(d.withdrawable)||0;
     const prev = hist.length>1 ? Number(hist[hist.length-2].withdrawable)||0 : null;
@@ -1213,9 +1215,10 @@ function drawSettlements(){
     const dates = Object.keys(byDate).sort();
     let html = '';
     if (dates.length >= 2){
-      if (fs){
-        const pts = dates.map(dt => { const d=byDate[dt][0]; return {x:dt, y:+Number(d.withdrawable||0).toFixed(0)}; });
-        html = `<div class="chart"><h3>${esc(fs)} 인출가능 추이</h3><div class="sub">정산일 기준 · ${dates.length}일</div>${lineSVG(pts,{fmt:v=>'$'+Math.round(v).toLocaleString('en-US')})}</div>`;
+      if (fs || fy){
+        const pts = dates.map(dt => ({x:dt, y:+byDate[dt].reduce((a,d)=>a+(Number(d.withdrawable)||0),0).toFixed(0)}));
+        const title = [fs, fy].filter(Boolean).join(' · ');
+        html = `<div class="chart"><h3>${esc(title)} 인출가능 추이</h3><div class="sub">정산일 기준 · ${dates.length}일${(fs&&!fy&&names.length>1)?' · 종목 합계':''}</div>${lineSVG(pts,{fmt:v=>'$'+Math.round(v).toLocaleString('en-US')})}</div>`;
       } else {
         const nSheets = names.length;
         const pts = dates.filter(dt => byDate[dt].length === nSheets)   // 모든 시트가 정산된 날만(합계 왜곡 방지)
