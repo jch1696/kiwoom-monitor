@@ -1679,9 +1679,9 @@ function drawPnl(){
     const pf = isSell ? (profit[t.id]||0) : null;
     const um = R.unmatched[t.id];
     return `<tr style="background:${pcBg(k)}">
-      <td style="box-shadow:inset 6px 0 0 ${pcAccent(k)}">${esc(t.date)}</td>
+      <td style="box-shadow:inset 6px 0 0 ${pcAccent(k)};cursor:pointer" title="클릭해서 날짜 수정" onclick="editDate('${esc(t.id)}','${esc(t.date)}')">${esc(t.date)} <span style="color:#7d8590;font-size:11px">✎</span></td>
       <td>${esc(t.sheet)}${String(t.note||'').startsWith('auto')?' <span class="tag preview" title="봇이 체결 조회로 자동 기록">auto</span>':''}</td>
-      <td><span class="lchip" style="cursor:pointer" title="클릭해서 층 수정" onclick="editTier('${esc(t.id)}',${Number(t.tier)||0})">L${esc(t.tier)} ✎</span></td>
+      <td><span class="lchip" style="cursor:pointer${Number(t.tier)>0?'':';background:#4a3a12;color:#ffd27a'}" title="${Number(t.tier)>0?'클릭해서 층 수정':'층 미상 — 봇이 접수 기록을 못 찾은 체결(전환 전 HTS 주문 등). 클릭해서 층을 입력하세요'}" onclick="editTier('${esc(t.id)}',${Number(t.tier)||0})">${Number(t.tier)>0?'L'+esc(t.tier):'층?'} ✎</span></td>
       <td><span class="bs ${isSell?'sell':'buy'}">${isSell?'매도':'매수'}</span></td>
       <td>$${fmtUSD(t.price)}</td><td>${esc(t.qty)}</td><td>$${fmtUSD(t.fee)}</td>
       <td>$${fmtUSD(tradeNet(t))}</td>
@@ -1791,8 +1791,23 @@ async function editTier(id, cur){
       body: JSON.stringify({ tier }) });
     if(!r.ok){ $('pnl_msg').textContent = `층 수정 실패 ${r.status}: ${await r.text()}`; return; }
     const t = _trades.find(x=>x.id===id); if (t) t.tier = tier;
-    $('pnl_msg').textContent = `층 수정됨 → L${tier}`; drawPnl();
+    $('pnl_msg').textContent = t ? `층 수정됨: ${t.sheet} ${t.date} ${t.side==='sell'?'매도':'매수'} ${t.qty}주 → L${tier}` : `층 수정됨 → L${tier}`; drawPnl();
   } catch(e){ $('pnl_msg').textContent = '층 수정 오류: '+e; }
+}
+// 날짜만 고치기 — 자동 기록이 미국 세션일로 적혔던 건을 한국 날짜로 (v0.7.5 부터는 한국 날짜로 기록)
+async function editDate(id, cur){
+  const v = prompt('이 거래의 날짜를 입력하세요 (YYYY-MM-DD)', String(cur||''));
+  if (v==null) return;
+  const date = v.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(Date.parse(date))) { $('pnl_msg').textContent='날짜는 YYYY-MM-DD 형식'; return; }
+  try {
+    const r = await fetch(`${URL_}/rest/v1/trades?id=eq.${encodeURIComponent(id)}`, {
+      method:'PATCH', headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, 'Content-Type':'application/json', Prefer:'return=minimal' },
+      body: JSON.stringify({ date }) });
+    if(!r.ok){ $('pnl_msg').textContent = `날짜 수정 실패 ${r.status}: ${await r.text()}`; return; }
+    const t = _trades.find(x=>x.id===id); if (t) t.date = date;
+    $('pnl_msg').textContent = t ? `날짜 수정됨: ${t.sheet} ${t.side==='sell'?'매도':'매수'} ${t.qty}주 → ${date}` : `날짜 수정됨 → ${date}`; drawPnl();
+  } catch(e){ $('pnl_msg').textContent = '날짜 수정 오류: '+e; }
 }
 async function addTrade(){
   const v = id => { const e=$(id); return e?e.value.trim():''; };
