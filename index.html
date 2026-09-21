@@ -1680,7 +1680,8 @@ function drawPnl(){
     const um = R.unmatched[t.id];
     return `<tr style="background:${pcBg(k)}">
       <td style="box-shadow:inset 6px 0 0 ${pcAccent(k)}">${esc(t.date)}</td>
-      <td>${esc(t.sheet)}${String(t.note||'').startsWith('auto')?' <span class="tag preview" title="봇이 체결 조회로 자동 기록">auto</span>':''}</td><td>${esc(t.tier)}</td>
+      <td>${esc(t.sheet)}${String(t.note||'').startsWith('auto')?' <span class="tag preview" title="봇이 체결 조회로 자동 기록">auto</span>':''}</td>
+      <td><span class="lchip" style="cursor:pointer" title="클릭해서 층 수정" onclick="editTier('${esc(t.id)}',${Number(t.tier)||0})">L${esc(t.tier)} ✎</span></td>
       <td><span class="bs ${isSell?'sell':'buy'}">${isSell?'매도':'매수'}</span></td>
       <td>$${fmtUSD(t.price)}</td><td>${esc(t.qty)}</td><td>$${fmtUSD(t.fee)}</td>
       <td>$${fmtUSD(tradeNet(t))}</td>
@@ -1778,6 +1779,20 @@ function renderMonthly(R){
     + pInput
     + `<h4 style="margin:10px 0 4px;color:#cfd3da;font-size:14px;">월별</h4>` + _periodTable('월', byMonth, sheets, principalOf, monthRep, globalP)
     + `<h4 style="margin:12px 0 4px;color:#cfd3da;font-size:14px;">년도별</h4>` + _periodTable('년', byYear, sheets, principalOf, yearRep, globalP);
+}
+// 손익 표에서 층(Tier)만 고치기 — 삭제·재입력 없이 (자동 기록의 층이 어긋났을 때)
+async function editTier(id, cur){
+  const v = prompt('이 거래의 층(Tier)을 입력하세요', String(cur));
+  if (v==null) return;
+  const tier = parseInt(v); if (!(tier>=0)) { $('pnl_msg').textContent='층은 0 이상의 정수'; return; }
+  try {
+    const r = await fetch(`${URL_}/rest/v1/trades?id=eq.${encodeURIComponent(id)}`, {
+      method:'PATCH', headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, 'Content-Type':'application/json', Prefer:'return=minimal' },
+      body: JSON.stringify({ tier }) });
+    if(!r.ok){ $('pnl_msg').textContent = `층 수정 실패 ${r.status}: ${await r.text()}`; return; }
+    const t = _trades.find(x=>x.id===id); if (t) t.tier = tier;
+    $('pnl_msg').textContent = `층 수정됨 → L${tier}`; drawPnl();
+  } catch(e){ $('pnl_msg').textContent = '층 수정 오류: '+e; }
 }
 async function addTrade(){
   const v = id => { const e=$(id); return e?e.value.trim():''; };
