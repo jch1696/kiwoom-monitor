@@ -1668,7 +1668,11 @@ function drawPnl(){
   $('pnl_summary').innerHTML = cards ||
     '<div class="row">입력된 거래 없음 — 아래에서 매수/매도를 추가하세요.</div>';
   // ── 거래 표(필터 적용, 최신순) ──
-  const all = _trades.filter(t => (!fs||t.sheet===fs));
+  // 같은 날짜 안에서는 그리드 진행 순서로(최신이 위): 매수는 깊은 층이 나중, 매도는 얕은 층이 나중.
+  //   입력·자동기록 순서(created_at)에 기대면 L5·L7·L6 처럼 섞여 보인다. 손익 매칭은 층별이라 표시 순서와 무관.
+  const gridPos = t => (t.side==='buy' ? 1 : -1) * (Number(t.tier)||0);
+  const all = _trades.filter(t => (!fs||t.sheet===fs)).sort((a,b)=>
+    String(b.date).localeCompare(String(a.date)) || (gridPos(b)-gridPos(a)) || String(b.created_at||'').localeCompare(String(a.created_at||'')));
   // 수천 행을 한 번에 그리면 브라우저가 느려짐 → 최신 N건만 표시(요약·월별은 전체 기준)
   const rows = all.slice(0, _pnlLimit);
   const head = `<table><tr><th>날짜</th><th>시트</th><th>Tier</th><th>구분</th><th>체결단가</th>
