@@ -1686,7 +1686,7 @@ function drawPnl(){
       <td>$${fmtUSD(t.price)}</td><td>${esc(t.qty)}</td><td>$${fmtUSD(t.fee)}</td>
       <td>$${fmtUSD(tradeNet(t))}</td>
       <td>${isSell?('<b class="'+(pf>=0?'gain':'loss')+'">$'+fmtUSD(pf)+'</b>'+(um?` <span class="loss">(미매칭 ${um})</span>`:'')):'-'}</td>
-      <td><button class="delx" onclick="delTrade('${esc(t.id)}')">삭제</button></td>
+      <td style="white-space:nowrap"><button class="delx" style="background:#2b3d55" title="이 거래를 층별 여러 건으로 나누기(여러 층을 한 번에 산 보정 매수 등)" onclick="splitTrade('${esc(t.id)}')">나누기</button> <button class="delx" onclick="delTrade('${esc(t.id)}')">삭제</button></td>
     </tr>`;
   }).join('');
   if($('pnl_count')) $('pnl_count').textContent =
@@ -1808,6 +1808,29 @@ async function editDate(id, cur){
     const t = _trades.find(x=>x.id===id); if (t) t.date = date;
     $('pnl_msg').textContent = t ? `날짜 수정됨: ${t.sheet} ${t.side==='sell'?'매도':'매수'} ${t.qty}주 → ${date}` : `날짜 수정됨 → ${date}`; drawPnl();
   } catch(e){ $('pnl_msg').textContent = '날짜 수정 오류: '+e; }
+}
+// 한 건을 층별 여러 건으로 — 예: L1→L5 보정 매수 249주를 "2:62,3:62,4:62,5:63" 으로. 날짜·단가·auto 표시는 그대로, 수수료는 수량 비례.
+async function splitTrade(id){
+  const t = _trades.find(x=>String(x.id)===String(id)); if(!t) return;
+  const v = prompt(`${t.sheet} ${t.date} ${t.side==='sell'?'매도':'매수'} ${t.qty}주 @ $${fmtUSD(t.price)} 를 나눕니다.\n"층:수량" 을 쉼표로 (합계 ${t.qty}주)`, `${t.tier}:${t.qty}`);
+  if (v==null) return;
+  const parts = v.split(/[,\s]+/).filter(Boolean).map(s=>{ const m=s.match(/^(\d+)\s*[:=\/]\s*(\d+)$/); return m?{tier:+m[1], qty:+m[2]}:null; });
+  if (parts.some(p=>!p||p.qty<=0)) { $('pnl_msg').textContent='형식: 2:62,3:62,4:62,5:63'; return; }
+  const sum = parts.reduce((a,p)=>a+p.qty,0);
+  if (sum !== Number(t.qty)) { $('pnl_msg').textContent=`수량 합 ${sum} ≠ 원래 ${t.qty}`; return; }
+  const H = { apikey:KEY_, Authorization:'Bearer '+TOKEN_, 'Content-Type':'application/json', Prefer:'return=representation' };
+  const rows = parts.map(p=>({ sheet:t.sheet, symbol:t.symbol||null, date:t.date, tier:p.tier, side:t.side, price:t.price, qty:p.qty,
+    fee: Math.round((Number(t.fee)||0)*p.qty/Number(t.qty)*100)/100, cycle:t.cycle||1, note:t.note||null }));
+  try {
+    const r = await fetch(`${URL_}/rest/v1/trades`, { method:'POST', headers:H, body: JSON.stringify(rows) });
+    if(!r.ok){ $('pnl_msg').textContent = `나누기 실패 ${r.status}: ${await r.text()}`; return; }
+    const made = await r.json();
+    const d = await fetch(`${URL_}/rest/v1/trades?id=eq.${encodeURIComponent(id)}`, { method:'DELETE', headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, Prefer:'return=minimal' } });
+    if(!d.ok){ $('pnl_msg').textContent = `새 행은 넣었으나 원본 삭제 실패 ${d.status} — 원본을 직접 삭제하세요`; }
+    _trades = _trades.filter(x=>String(x.id)!==String(id));
+    (Array.isArray(made)?made:rows).forEach(x=>_trades.unshift(x));
+    $('pnl_msg').textContent = `나눔: ${parts.map(p=>'L'+p.tier+' '+p.qty+'주').join(', ')}`; drawPnl();
+  } catch(e){ $('pnl_msg').textContent = '나누기 오류: '+e; }
 }
 async function addTrade(){
   const v = id => { const e=$(id); return e?e.value.trim():''; };
