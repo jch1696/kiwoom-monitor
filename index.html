@@ -99,7 +99,7 @@
   .two { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px,1fr)); gap:10px; }
   .grp { background:#161a20; border:1px solid #2A2F36; border-radius:10px; padding:10px 12px; }
   .grp h4 { margin:0 0 6px; font-size:13px; color:#cfd3da; }
-  .ladder svg { width:100%; height:auto; display:block; }
+  .ladder svg { width:100%; max-width:720px; height:auto; display:block; margin:0 auto; }
   details.raw summary { cursor:pointer; color:#9AA0A6; font-size:13px; margin:10px 0 4px; }
   .hidden { display:none; }
   .cmds { margin-top:10px; display:flex; gap:6px; flex-wrap:wrap; }
@@ -959,7 +959,8 @@ const sMoney = v => (v<0?'-':'')+'$'+fmtUSD(Math.abs(v));
 function gridMoney(grid, label, headerRe){ const n = gNum(headerRe ? gridLookupIn(grid, label, headerRe) : gridLookup(grid, label)); return n==null ? '-' : sMoney(n); }
 // 가격 축 위 주문 사다리: 왼쪽 업다운, 오른쪽 떨사오팔. 매수=아래(빨강), 매도=위(파랑), 막대 길이=수량.
 function ladderSVG(L, close, opt={}){
-  const w=560, h=opt.h||300, padT=14, padB=18, midX=w/2, axisW=64;
+  const nOrd=['updown_buys','updown_sells','tteol_buys','tteol_sells'].reduce((a,k)=>a+((L[k]||[]).length),0);
+  const w=560, h=opt.h||Math.min(480, Math.max(300, 200+nOrd*8)), padT=18, padB=18, midX=w/2, axisW=64;
   const groups=[{name:'업다운', buys:L.updown_buys||[], sells:L.updown_sells||[], x0:8, x1:midX-axisW/2-6},
                 {name:'떨사오팔', buys:L.tteol_buys||[], sells:L.tteol_sells||[], x0:midX+axisW/2+6, x1:w-8}];
   const all=[...groups[0].buys,...groups[0].sells,...groups[1].buys,...groups[1].sells].map(o=>Number(o.price)).filter(x=>x>0);
@@ -985,11 +986,11 @@ function ladderSVG(L, close, opt={}){
         out+=`<g onmousemove="tipShow(event,'${esc(g.name)} ${isBuy?'매수':'매도'}<br><b>${q}주 @ $${fmtUSD(pr)}</b>')" onmouseleave="tipHide()">
           <rect x="${left?g.x0:g.x0}" y="${y-5}" width="${span}" height="10" fill="transparent"/>
           <rect x="${x}" y="${y-2}" width="${len}" height="4" rx="2" fill="${color}"/></g>`;
-        if(i===0 || i===orders.length-1)
-          out+=`<text x="${left? g.x1-len-4 : g.x0+len+4}" y="${y+4}" text-anchor="${left?'end':'start'}" font-size="10" fill="${VIZ.tx2}">$${fmtUSD(pr)}${i===0?' ·'+q+'주':''}</text>`;
+        if(i===0 || i===orders.length-1)   // 라벨은 막대 위, 축 반대쪽 끝에서 안쪽으로 → 화면 밖으로 안 나감
+          out+=`<text x="${left? g.x1-len : g.x0+len}" y="${y-5}" text-anchor="${left?'start':'end'}" font-size="10" fill="${isBuy?'#e66767':'#3987e5'}">$${fmtUSD(pr)}${i===0?' · '+q+'주':''}</text>`;
       });
     };
-    draw(g.sells, '#3987e5', false); draw(g.buys, '#e66767', true);
+    draw(g.buys, '#e66767', true); draw(g.sells, '#3987e5', false);   // 매도(파랑)를 위에
   });
   return `<svg viewBox="0 0 ${w} ${h}">${out}</svg>`;
 }
