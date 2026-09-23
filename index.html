@@ -908,6 +908,9 @@ function _mirrorLadder(title, sells, buys){
 let _switchPnl = [];
 let _switchMirrors = [];
 let _switchOrdersToday = [];
+const _swPnlFilter = {}, _swPnlLimit = {};        // 스위치 실현손익 표: 작업별 필터·표시 건수
+function swPnlFilter(k, f){ _swPnlFilter[k]=f; _swPnlLimit[k]=20; renderSwitchTab(); }
+function swPnlMore(k){ _swPnlLimit[k]=(_swPnlLimit[k]||20)+50; renderSwitchTab(); }
 async function loadSwitchOrdersToday(){
   try {
     const d = new Date(); d.setHours(0,0,0,0);
@@ -979,15 +982,22 @@ function ladderSVG(L, close, opt={}){
   groups.forEach((g,gi)=>{
     const left = gi===0, span=g.x1-g.x0;
     out+=`<text x="${left?g.x0:g.x1}" y="${padT-3}" text-anchor="${left?'start':'end'}" font-size="11" fill="${VIZ.tx}" font-weight="700">${esc(g.name)}</text>`;
+    const used=[];                                    // 이 그룹에서 라벨이 놓인 y (겹침 방지)
     const draw=(orders, color, isBuy)=>{
       orders.forEach((o,i)=>{
-        const q=Number(o.qty)||0, pr=Number(o.price)||0, len=Math.max(6, span*0.9*(q/maxQ)), y=Y(pr);
+        const q=Number(o.qty)||0, pr=Number(o.price)||0, y=Y(pr);
+        // 길이 = 수량의 제곱근 비례: 시트 사다리는 기본 주문 + '1주' 가로대 15개라 선형이면 1주가 안 보임
+        const len=Math.max(8, span*0.9*Math.sqrt(q/maxQ));
         const x=left? g.x1-len : g.x0;
         out+=`<g onmousemove="tipShow(event,'${esc(g.name)} ${isBuy?'매수':'매도'}<br><b>${q}주 @ $${fmtUSD(pr)}</b>')" onmouseleave="tipHide()">
-          <rect x="${left?g.x0:g.x0}" y="${y-5}" width="${span}" height="10" fill="transparent"/>
+          <rect x="${g.x0}" y="${y-5}" width="${span}" height="10" fill="transparent"/>
           <rect x="${x}" y="${y-2}" width="${len}" height="4" rx="2" fill="${color}"/></g>`;
-        if(i===0 || i===orders.length-1)   // 라벨은 막대 위, 축 반대쪽 끝에서 안쪽으로 → 화면 밖으로 안 나감
-          out+=`<text x="${left? g.x1-len : g.x0+len}" y="${y-5}" text-anchor="${left?'start':'end'}" font-size="10" fill="${isBuy?'#e66767':'#3987e5'}">$${fmtUSD(pr)}${i===0?' · '+q+'주':''}</text>`;
+        // 가격 라벨: 매도는 막대 위, 매수는 막대 아래. 이미 놓인 라벨과 11px 안이면 생략(첫 주문은 항상)
+        const ly = isBuy ? y+12 : y-5;
+        if(i===0 || !used.some(u=>Math.abs(u-ly)<11)){
+          used.push(ly);
+          out+=`<text x="${left? g.x1-len : g.x0+len}" y="${ly}" text-anchor="${left?'start':'end'}" font-size="10" fill="${isBuy?'#e66767':'#3987e5'}">$${fmtUSD(pr)}${(i===0||q>1)?' · '+q+'주':''}</text>`;
+        }
       });
     };
     draw(g.buys, '#e66767', true); draw(g.sells, '#3987e5', false);   // 매도(파랑)를 위에
@@ -1022,8 +1032,21 @@ function renderSwitchTab(){
     // 실현손익: 누적 선 + 최근 8건
     const pn=(p.pnl||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
     let cum=0; const cumPts=pn.map(x=>{ cum+=Number(x.profit)||0; return {x:x.date, y:+cum.toFixed(2)}; });
-    const recent=pn.slice(-8).reverse().map(x=>`<tr><td>${esc(x.date)}</td><td>${esc(String(x.group||'').replace(/^\S+\s/,''))}</td><td>${esc(x.qty)}주 @ $${fmtUSD(x.price)}</td><td class="${Number(x.profit)>=0?'gain':'loss'}">${Number(x.profit)>=0?'+':''}${sMoney(Number(x.profit))}</td></tr>`).join('');
-    const pnlBlock = cumPts.length>=2 ? `<div class="chart"><h3>누적 실현손익</h3><div class="sub">${pn[0].date} ~ ${pn[pn.length-1].date} · 매도 ${pn.length}건 · 합계 ${sMoney(cum)}</div>${lineSVG(cumPts,{h:180,fmt:v=>'$'+Math.round(v).toLocaleString('en-US')})}</div>` : '';
+    const gname=x=>String(x.group||'').replace(/^\S+\s/,'');
+    const sumOf=re=>pn.filter(x=>re.test(gname(x))).reduce((a,x)=>a+(Number(x.profit)||0),0);
+    const cntOf=re=>pn.filter(x=>re.test(gname(x))).length;
+    const upSum=sumOf(/업다운/), ttSum=sumOf(/떨사오팔/);
+    const chip=(k,v,n)=>`<div class="kpi"><div class="k">${k}</div><div class="v ${v>=0?'gain':'loss'}">${v>=0?'+':''}${sMoney(v)}</div><div class="k">매도 ${n}건</div></div>`;
+    const swKey=task.replace(/\W/g,'_');
+    const filt=_swPnlFilter[swKey]||'all', lim=_swPnlLimit[swKey]||20;
+    const shown=pn.slice().reverse().filter(x=> filt==='all' || (filt==='up' ? /업다운/.test(gname(x)) : /떨사오팔/.test(gname(x))));
+    const recent=shown.slice(0,lim).map(x=>`<tr><td>${esc(x.date)}</td><td><span class="lchip" style="background:${/업다운/.test(gname(x))?'#26313f':'#3a2d3f'}">${esc(gname(x))}</span></td><td>${esc(x.qty)}주 @ $${fmtUSD(x.price)}</td><td>C${esc(x.cycle||'')}</td><td class="${Number(x.profit)>=0?'gain':'loss'}">${Number(x.profit)>=0?'+':''}${sMoney(Number(x.profit))}</td></tr>`).join('');
+    const fbtn=(k,l)=>`<button class="ghost" style="padding:2px 9px;font-size:12px;${filt===k?'border-color:#3987e5;color:#cfe1ff':''}" onclick="swPnlFilter('${swKey}','${k}')">${l}</button>`;
+    const moreBtn = shown.length>lim ? `<button class="ghost" style="padding:2px 9px;font-size:12px;margin-top:6px" onclick="swPnlMore('${swKey}')">더 보기 (${shown.length-lim}건 남음)</button>` : '';
+    const pnlBlock = cumPts.length>=2 ? `<div class="chart"><h3>누적 실현손익</h3><div class="sub">${pn[0].date} ~ ${pn[pn.length-1].date} · 매도 ${pn.length}건 · 합계 ${sMoney(cum)}</div>
+      <div class="kpis" style="margin:6px 0 8px">${chip('업다운 합계', upSum, cntOf(/업다운/))}${chip('떨사오팔 합계', ttSum, cntOf(/떨사오팔/))}</div>
+      ${lineSVG(cumPts,{h:180,fmt:v=>'$'+Math.round(v).toLocaleString('en-US')})}</div>` : '';
+    const filterBar=`<div style="display:flex;gap:6px;align-items:center;margin:4px 0 6px"><b style="font-size:13px;color:#cfd3da;margin-right:4px">실현손익 기록</b>${fbtn('all','전체')}${fbtn('up','업다운')}${fbtn('tt','떨사오팔')}<span class="row" style="margin-left:6px">${shown.length}건</span></div>`;
     // 오늘 접수 주문 요약
     const od=_switchOrdersToday.filter(o=>String(o.task||'')===task);
     const cnt=(grp,side)=>od.filter(o=>String(o.reason||'').startsWith(grp) && String(o.side||'').toUpperCase()===side).length;
@@ -1042,7 +1065,7 @@ function renderSwitchTab(){
         <div class="ladder">${ladderSVG(L, close)}</div></div>
       <div class="row" style="margin:6px 0 10px">📥 오늘 접수: ${todayLine}</div>
       ${pnlBlock}
-      ${recent?`<table class="lntab" style="width:auto"><tr><th>날짜</th><th>그룹</th><th>체결</th><th>손익</th></tr>${recent}</table>`:''}
+      ${pn.length?`${filterBar}<table class="lntab" style="width:auto"><tr><th>날짜</th><th>그룹</th><th>체결</th><th>Cycle</th><th>손익</th></tr>${recent}</table>${moreBtn}`:''}
       <details class="raw"><summary>시트 원본 보기</summary><div style="overflow:auto;max-height:340px;"><table class="lntab">${raw}</table></div></details>
     </div>`;
   }).join('');
