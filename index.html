@@ -212,6 +212,7 @@
 
     <div class="tabpane" data-pane="monitor">
       <div id="summary" class="summary"></div>
+      <div id="coverage"></div>
       <h2>내 PC (에이전트)</h2>
       <div id="agents" class="grid"></div>
       <h2>작업 현재 상태</h2>
@@ -422,6 +423,7 @@ async function refresh(force){
     renderAlerts(agents, status);
     if (tab === 'monitor' || force){ await loadOrdersToday(); }
     renderSummary(agents, status);
+    renderCoverage(status);
     // 탭별: 보이는 탭 것만(강제 새로고침이면 전부)
     if (tab === 'logs' || force){
       const [orders, commands] = await Promise.all([
@@ -555,6 +557,44 @@ function tierInfo(sheetName, balance){
            buyQty: best.buy_qty, sellQty: best.sell_qty };
 }
 let _ordersToday = null;
+// ── 현금 대비 사다리 커버율: 주문가능 현금으로 지금 층 아래 몇 층까지 살 수 있나 ──
+function coverageOf(d){
+  const p = sheetPayloadByName(d.sheet); if(!p) return null;
+  const rows = computeSheetJS(p); if(!rows.length) return null;
+  const ti = tierInfo(d.sheet, d.balance); if(!ti) return null;
+  const cash = Number(d.usd)||0, price = Number(d.price)||0;
+  const total = parseInt(p.total_lines)||rows.length-1;
+  let need = 0; for (let L = ti.tier+1; L <= total; L++) need += rows[L] ? rows[L].invest : 0;   // 남은 층 전부 사는 데 필요한 돈
+  let left = cash, cover = ti.tier;                                                             // 현금으로 채울 수 있는 마지막 층
+  for (let L = ti.tier+1; L <= total; L++){ const inv = rows[L] ? rows[L].invest : 0; if (left < inv) break; left -= inv; cover = L; }
+  const coverPrice = rows[cover] ? rows[cover].avg_price : 0;
+  const drop = (price>0 && coverPrice>0) ? (coverPrice/price-1)*100 : null;
+  const bottomPrice = rows[total] ? rows[total].avg_price : 0;
+  const bottomDrop = (price>0 && bottomPrice>0) ? (bottomPrice/price-1)*100 : null;
+  return { tier: ti.tier, total, cash, need, ratio: need>0 ? Math.min(1, cash/need) : 1, cover, drop, bottomDrop, spare: need>0 ? Math.max(0, cash-need) : cash };
+}
+function renderCoverage(status){
+  const box = $('coverage'); if(!box) return;
+  const rows = (status||[]).filter(d => d.sheet && !/^스위치/.test(String(d.sheet)) && d.active !== false && d.usd != null);
+  const items = rows.map(d => ({d, c: coverageOf(d)})).filter(x => x.c);
+  if(!items.length){ box.innerHTML=''; return; }
+  const money = v => '$'+Math.round(v).toLocaleString('en-US');
+  const cards = items.sort((a,b)=>a.c.ratio-b.c.ratio).map(({d,c}) => {
+    const pct = Math.round(c.ratio*100);
+    const col = c.ratio>=1 ? '#1DB954' : c.ratio>=0.6 ? '#E0A106' : '#e06c6c';
+    const dropTxt = c.drop==null ? '' : `현재가에서 <b>${c.drop.toFixed(0)}%</b> 하락까지`;
+    const tail = c.ratio>=1
+      ? `<span class="gain">사다리 끝(L${c.total})까지 전부 커버 · 여유 ${money(c.spare)}</span>`
+      : `L<b>${c.cover}</b>/${c.total}층까지 · ${dropTxt} <span class="row" style="display:inline">(끝은 ${c.bottomDrop==null?'-':c.bottomDrop.toFixed(0)+'%'})</span>`;
+    return `<div class="card" style="background:${pcBg(d.agent_id||d.task)};border-left:6px solid ${pcAccent(d.agent_id||d.task)};">
+      <div class="chead"><span class="sym">${esc(d.sheet)}</span><span class="tier">L${c.tier}/${c.total}</span><b style="color:${col};margin-left:auto">${pct}%</b></div>
+      <div class="gauge" title="커버율 ${pct}%"><i style="width:${pct}%;background:${col}"></i></div>
+      <div class="row">주문가능 <b class="px">${money(c.cash)}</b> / 남은 층 필요 <b>${money(c.need)}</b></div>
+      <div class="row">${tail}</div>
+    </div>`;
+  }).join('');
+  box.innerHTML = `<div class="chart" style="margin-top:8px"><h3>현금 대비 사다리 커버율</h3><div class="sub">주문가능 현금으로 지금 층 아래를 몇 층까지 살 수 있나 · 필요 금액 = 남은 층 투자금 합(정산의 매수예정) · 100% 넘는 만큼이 사다리 밖 여유 현금</div><div class="grid">${cards}</div></div>`;
+}
 function renderSummary(agents, status){
   const box = $('summary'); if(!box) return;
   const on = (agents||[]).filter(a => freshness(a.last_seen_at, a.heartbeat_interval_sec)==='online').length;
