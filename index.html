@@ -439,7 +439,7 @@ async function refresh(force){
       catch(e){ $('sheets').innerHTML = '<div class="row">시트 테이블 없음 — schema.sql의 sheets 테이블을 Supabase에 추가하세요.</div>'; }
     }
     if (tab === 'settle' || force){
-      try { const st = await api('settlements?select=*&order=date.desc,sheet.asc&limit=300'); if (changed('settlements', st) || force) renderSettlements(st); }
+      try { const st = await apiAll('settlements?select=*&order=date.desc,sheet.asc'); if (changed('settlements', st) || force) renderSettlements(st); }
       catch(e){ $('settlements').innerHTML = '<div class="row">정산 테이블 없음 — schema.sql의 settlements 테이블을 Supabase에 추가하세요.</div>'; }
     }
     // 거래(trades)는 수천 건이라 최초 1회 + 강제 새로고침·일괄변경 때만.
@@ -1028,6 +1028,10 @@ function renderSwitchTab(){
     const UP=/업다운|Updown/i, TT=/떨사오팔/;
     const upPnl=gNum(gridLookupIn(g,'실현손익',UP)), ttPnl=gNum(gridLookupIn(g,'실현손익',TT));
     const up=grp('업다운', [['보유 포트', gridLookupIn(g,'보유 포트',UP)||'0'],['보유 수량', (gridLookupIn(g,'보유 수량',UP)||'0')+'주'],['실현손익', upPnl==null?'-':`<span class="${upPnl>=0?'gain':'loss'}">${sMoney(upPnl)}</span>`],['LP', close?money(close):'-'],['매수 단가', (gNum(gridLookupIn(g,'매수 단가',UP))!=null) ? gridMoney(g,'매수 단가',UP) : ((L.updown_buys||[]).length ? '$'+fmtUSD(L.updown_buys[0].price) : '-')],['시드 사용', gridMoney(g,'시드 사용',UP)],['매도 대기', (L.updown_sells||[]).length?`${(L.updown_sells||[]).length}건 @ $${fmtUSD(L.updown_sells[0].price)}`:'없음']]);
+    const rk=p.ranks||[];
+    const rankTable = rk.length ? `<table class="lntab" style="margin-top:6px;width:auto"><tr><th>랭크</th><th>매수일</th><th>매수가</th><th>수량</th><th>매도 기준</th><th>매도 목표</th><th>현재가 대비</th><th>보유일</th></tr>${rk.map(r=>{
+        const gap = close>0 && r.sell_price>0 ? (close/r.sell_price-1)*100 : null;
+        return `<tr><td><b>${esc(r.rank)}</b></td><td>${esc(r.date)}</td><td>$${fmtUSD(r.price)}</td><td>${esc(r.qty)}주</td><td>${r.basis?('+'+(r.basis*100).toFixed(1)+'%'):'0%'}</td><td><b>$${fmtUSD(r.sell_price)}</b></td><td class="${gap==null?'':(gap>=0?'gain':'loss')}">${gap==null?'-':((gap>=0?'+':'')+gap.toFixed(2)+'%')}</td><td>${r.days!=null?r.days+'일':'-'}</td></tr>`; }).join('')}</table>` : '';
     const tt=grp('떨사오팔', [['보유 랭크', gridLookupIn(g,'보유 랭크',TT)||'0'],['보유 수량', (gridLookupIn(g,'보유 수량',TT)||'0')+'주'],['실현손익', ttPnl==null?'-':`<span class="${ttPnl>=0?'gain':'loss'}">${sMoney(ttPnl)}</span>`],['랭크 복리 기준', gridLookupIn(g,'랭크 복리 기준',TT)||gridLookupIn(g,'랭크 복리',TT)||'-'],['1회 매수금', gridMoney(g,'1회 매수금',TT)],['시드 사용', gridMoney(g,'시드 사용',TT)],['매도 대기', (L.tteol_sells||[]).length?(L.tteol_sells||[]).map(o=>`${o.qty}주 @ $${fmtUSD(o.price)}`).join(', '):'없음']]);
     // 실현손익: 누적 선 + 최근 8건
     const pn=(p.pnl||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
@@ -1080,6 +1084,7 @@ function renderSwitchTab(){
       </div>` : ''}
       <div class="kpis">${kpis}</div>
       <div class="two">${up}${tt}</div>
+      ${rankTable ? `<div class="grp" style="margin-top:8px"><h4>떨사오팔 보유 랭크 (랭크별 매도 기준)</h4>${rankTable}<div class="row">매도 목표 = 매수가 × (1 + 매도 기준). 현재가 대비 = 종가가 목표에서 얼마나 떨어져 있나(＋면 목표 도달)</div></div>` : ''}
       <div class="chart" style="margin-top:10px"><h3>오늘의 주문 사다리 <span class="row" style="display:inline">· ${total}건 · 빨강=매수(아래) 파랑=매도(위) · 막대 길이=수량</span></h3>
         <div class="ladder">${ladderSVG(L, close)}</div></div>
       <div class="row" style="margin:6px 0 10px">📥 오늘 접수: ${todayLine}</div>
@@ -1328,6 +1333,8 @@ function fillOptions(sel, values){
   sel.innerHTML = '<option value="">전체</option>' + values.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
   if(values.indexOf(cur) >= 0) sel.value = cur;
 }
+let _settleRange = (()=>{ try { return localStorage.getItem('settleRange')||'3m'; } catch(e){ return '3m'; } })();
+function setSettleRange(k){ _settleRange=k; try { localStorage.setItem('settleRange',k); } catch(e){} drawSettlements(); }
 function renderSettlements(rows){
   _settlements = rows || [];
   const sheets = [...new Set(_settlements.map(d=>d.sheet).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b),'ko'));
@@ -1381,19 +1388,24 @@ function drawSettlements(){
   if (cbox){
     const byDate = {};
     rows.forEach(d => { (byDate[d.date] = byDate[d.date] || []).push(d); });
-    const dates = Object.keys(byDate).sort();
+    // 기간 선택(1개월/3개월/6개월/1년/전체) — 표는 최신순 그대로, 차트만 기간 적용
+    const rangeDays = {'1m':31,'3m':92,'6m':183,'1y':366,'all':0}[_settleRange]||0;
+    const cutoff = rangeDays ? new Date(Date.now()-rangeDays*86400000).toISOString().slice(0,10) : '';
+    const dates = Object.keys(byDate).sort().filter(dt => !cutoff || dt >= cutoff);
+    const rbtn=(k,l)=>`<button class="ghost" style="padding:2px 9px;font-size:12px;${_settleRange===k?'border-color:#3987e5;color:#cfe1ff':''}" onclick="setSettleRange('${k}')">${l}</button>`;
+    const rangeBar=`<div style="display:flex;gap:6px;align-items:center;margin:0 0 6px"><span class="row" style="margin-right:4px">기간</span>${rbtn('1m','1개월')}${rbtn('3m','3개월')}${rbtn('6m','6개월')}${rbtn('1y','1년')}${rbtn('all','전체')}</div>`;
     let html = '';
     if (dates.length >= 2){
       if (fs || fy){
         const pts = dates.map(dt => ({x:dt, y:+byDate[dt].reduce((a,d)=>a+(Number(d.withdrawable)||0),0).toFixed(0)}));
         const title = [fs, fy].filter(Boolean).join(' · ');
-        html = `<div class="chart"><h3>${esc(title)} 인출가능 추이</h3><div class="sub">정산일 기준 · ${dates.length}일${(fs&&!fy&&names.length>1)?' · 종목 합계':''}</div>${lineSVG(pts,{fmt:v=>'$'+Math.round(v).toLocaleString('en-US')})}</div>`;
+        html = `<div class="chart"><h3>${esc(title)} 인출가능 추이</h3><div class="sub">정산일 기준 · ${dates.length}일${(fs&&!fy&&names.length>1)?' · 종목 합계':''}</div>${rangeBar}${lineSVG(pts,{fmt:v=>'$'+Math.round(v).toLocaleString('en-US')})}</div>`;
       } else {
         const nSheets = names.length;
         const pts = dates.filter(dt => byDate[dt].length === nSheets)   // 모든 시트가 정산된 날만(합계 왜곡 방지)
           .map(dt => ({x:dt, y:+byDate[dt].reduce((a,d)=>a+(Number(d.cash)||0)+(Number(d.stock_value)||0),0).toFixed(0)}));
         if (pts.length >= 2)
-          html = `<div class="chart"><h3>전체 총자산 (예수금 + 주식평가) 추이</h3><div class="sub">시트 ${nSheets}개 모두 정산된 날만 · ${pts.length}일 · 시트 필터를 고르면 그 시트의 인출가능 추이로 바뀝니다</div>${lineSVG(pts,{fmt:v=>'$'+Math.round(v).toLocaleString('en-US')})}</div>`;
+          html = `<div class="chart"><h3>전체 총자산 (예수금 + 주식평가) 추이</h3><div class="sub">시트 ${nSheets}개 모두 정산된 날만 · ${pts.length}일 · 시트 필터를 고르면 그 시트의 인출가능 추이로 바뀝니다</div>${rangeBar}${lineSVG(pts,{fmt:v=>'$'+Math.round(v).toLocaleString('en-US')})}</div>`;
       }
     }
     cbox.innerHTML = html;
