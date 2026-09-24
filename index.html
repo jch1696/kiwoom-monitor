@@ -1054,6 +1054,19 @@ function renderSwitchTab(){
     const total=['updown_buys','updown_sells','tteol_buys','tteol_sells'].reduce((a,k)=>a+((L[k]||[]).length),0);
     const raw=g.map((row,ri)=>'<tr>'+row.map(c=>`<td>${esc(String(c||'').trim())}</td>`).join('')+'</tr>').join('');
     const actChip = st.action ? `<span class="act ${esc(st.action)}">${esc(st.action)}</span>` : '';
+    // 누적 원장(자체 엔진): 시트의 거래 입력 표와 같은 열. 최신이 위. 접어두고 필요할 때 펼침
+    const led=p.ledger||{};
+    const m$=v=>(v==null||v==='')?'':'$'+fmtUSD(v);
+    const pnlTd=v=>(v==null||v==='')?'<td></td>':`<td class="${Number(v)>=0?'gain':'loss'}">${Number(v)>=0?'+':''}${sMoney(Number(v))}</td>`;
+    const kindTd=k=>`<td><span class="bs ${k==='매도'?'sell':'buy'}">${esc(k)}</span></td>`;
+    const upRows=(led.updown||[]).map(r=>`<tr><td>${esc(r.date)}</td>${kindTd(r.kind)}<td>${esc(r.pot)}</td><td>${m$(r.price)}</td><td>${esc(r.qty)}</td><td>${m$(r.amount)}</td><td>${m$(r.fee)}</td><td>${esc(r.holding)}</td><td>${m$(r.cost)}</td><td>${m$(r.avg)}</td>${pnlTd(r.pnl)}<td>${esc(r.cycle)}</td></tr>`).join('');
+    const ttRows=(led.tteol||[]).map(r=>`<tr><td>${esc(r.date)}</td>${kindTd(r.kind)}<td>${esc(r.rank)}</td><td>${m$(r.price)}</td><td>${esc(r.qty)}</td><td>${m$(r.amount)}</td><td>${m$(r.fee)}</td>${pnlTd(r.pnl)}<td>${esc(r.cycle)}</td></tr>`).join('');
+    const ledgerBlock = (upRows||ttRows) ? `
+      <details class="raw" open><summary>누적 원장 — 업다운 ${(led.updown||[]).length}행 · 떨사오팔 ${(led.tteol||[]).length}행 (시트 거래 입력 표와 동일)</summary>
+        <div class="two" style="align-items:start">
+          <div><h4 style="margin:8px 0 4px;color:#cfd3da;font-size:13px">업다운 거래</h4><div style="overflow:auto;max-height:420px"><table class="lntab"><tr><th>날짜</th><th>구분</th><th>포트</th><th>체결단가</th><th>수량</th><th>거래금액</th><th>수수료</th><th>보유</th><th>매입금액</th><th>평단가</th><th>실현손익</th><th>Cycle</th></tr>${upRows}</table></div></div>
+          <div><h4 style="margin:8px 0 4px;color:#cfd3da;font-size:13px">떨사오팔 거래</h4><div style="overflow:auto;max-height:420px"><table class="lntab"><tr><th>날짜</th><th>구분</th><th>랭크</th><th>체결단가</th><th>수량</th><th>거래금액</th><th>수수료</th><th>실현손익</th><th>Cycle</th></tr>${ttRows}</table></div></div>
+        </div></details>` : '';
     return `<div class="card" style="margin-bottom:12px;">
       <div class="chead"><span class="sym">🔀 ${esc(task)} · ${esc(p.ticker||'')}</span>${actChip}
         <span class="tag ${p.engine==='local'?'live':'preview'}">${p.engine==='local'?'자체 엔진':'구글시트'}</span>
@@ -1066,6 +1079,7 @@ function renderSwitchTab(){
       <div class="row" style="margin:6px 0 10px">📥 오늘 접수: ${todayLine}</div>
       ${pnlBlock}
       ${pn.length?`${filterBar}<table class="lntab" style="width:auto"><tr><th>날짜</th><th>그룹</th><th>체결</th><th>Cycle</th><th>손익</th></tr>${recent}</table>${moreBtn}`:''}
+      ${ledgerBlock}
       <details class="raw"><summary>시트 원본 보기</summary><div style="overflow:auto;max-height:340px;"><table class="lntab">${raw}</table></div></details>
     </div>`;
   }).join('');
