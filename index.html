@@ -490,7 +490,7 @@ function uuid(){
 async function sendCmd(agentId, type, payload){
   payload = payload || {};
   const labels = { pause:'일시정지', resume:'재개',
-                   run_now:'즉시 실행', set_mode:'모드 변경', set_active:'활성변경' };
+                   run_now:'즉시 실행', set_mode:'모드 변경', set_active:'활성변경', switch_auto_move:'자동 이관 설정' };
   if (type==='set_mode' && payload.mode==='live' &&
       !confirm('⚠️ 실행(실주문) 모드로 바꿉니다. 이제부터 실제 주문이 나갑니다. 진행할까요?')) return;
   if (type==='set_active' && payload.active===false &&
@@ -515,7 +515,7 @@ async function sendCmd(agentId, type, payload){
 }
 
 function renderCommands(rows){
-  const label = { pause:'일시정지', resume:'재개', run_now:'즉시 실행', set_mode:'모드 변경', set_active:'활성 변경', emergency_stop:'비상정지', stop:'정지' };
+  const label = { pause:'일시정지', resume:'재개', run_now:'즉시 실행', set_mode:'모드 변경', set_active:'활성 변경', emergency_stop:'비상정지', stop:'정지', switch_auto_move:'자동 이관 설정' };
   const stKo = { queued:['대기','#E0A106'], running:['실행 중','#2d7ef7'], succeeded:['완료','#1DB954'], failed:['실패','#e06c6c'], expired:['만료','#8a9099'], cancelled:['취소','#8a9099'] };
   const head = `<table><tr><th>시각</th><th>PC</th><th>명령</th><th>상태</th><th>요청자</th><th>결과</th></tr>`;
   const body = (rows||[]).map(c => { const st = stKo[c.status] || [c.status, '#9AA0A6'];
@@ -1072,6 +1072,12 @@ function renderSwitchTab(){
         <span class="tag ${p.engine==='local'?'live':'preview'}">${p.engine==='local'?'자체 엔진':'구글시트'}</span>
         <span class="ago ${ageClass(p._ts, 900, 3600)}" style="margin:0">미러 ${esc(fmtAgo(p._ts))}${st.ts?' · 실행 '+esc(fmtAgo(st.ts)):''}</span></div>
       ${st.reason?`<div class="row">${esc(st.reason)}</div>`:''}
+      ${p.engine==='local' && p._agent ? `<div class="row" style="display:flex;align-items:center;gap:8px;margin:4px 0 8px">
+        <span>떨사오팔→업다운 자동 이관:</span>
+        <b class="${p.auto_move!==false?'gain':'loss'}">${p.auto_move!==false?'켬':'끔 (기다리는 중)'}</b>
+        <button class="ghost" style="padding:2px 9px;font-size:12px" onclick="sendCmd('${esc(p._agent)}','switch_auto_move',{nickname:'${esc(task).replace(/'/g,'')}',on:${p.auto_move!==false?'false':'true'}})">${p.auto_move!==false?'끄기 (이번엔 기다리기)':'켜기'}</button>
+        ${Number(p.pots)===0 && Number(p.held_ranks)>0 ? '<span class="loss">⚠ 포트 0 · 랭크 '+esc(p.held_ranks)+'개 보유 — 켜져 있으면 오늘 실행 때 전부 포트로 넘깁니다</span>' : ''}
+      </div>` : ''}
       <div class="kpis">${kpis}</div>
       <div class="two">${up}${tt}</div>
       <div class="chart" style="margin-top:10px"><h3>오늘의 주문 사다리 <span class="row" style="display:inline">· ${total}건 · 빨강=매수(아래) 파랑=매도(위) · 막대 길이=수량</span></h3>
