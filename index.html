@@ -1431,7 +1431,10 @@ function drawSettlements(){
     // 기간 선택(1개월/3개월/6개월/1년/전체) — 표는 최신순 그대로, 차트만 기간 적용
     const rangeDays = {'1m':31,'3m':92,'6m':183,'1y':366,'all':0}[_settleRange]||0;
     const cutoff = rangeDays ? new Date(Date.now()-rangeDays*86400000).toISOString().slice(0,10) : '';
-    const dates = Object.keys(byDate).sort().filter(dt => !cutoff || dt >= cutoff);
+    // 정산 date 는 'MM-DD'(연도 없음) — 오늘의 MM-DD 보다 뒤면 작년으로 보고 연도를 붙여 비교
+    const todayMD = new Date().toISOString().slice(5,10), thisY = new Date().getFullYear();
+    const fullDate = dt => /^\d{4}-/.test(dt) ? dt : `${dt > todayMD ? thisY-1 : thisY}-${dt}`;
+    const dates = Object.keys(byDate).sort().filter(dt => !cutoff || fullDate(dt) >= cutoff);
     const rbtn=(k,l)=>`<button class="ghost" style="padding:2px 9px;font-size:12px;${_settleRange===k?'border-color:#3987e5;color:#cfe1ff':''}" onclick="setSettleRange('${k}')">${l}</button>`;
     const rangeBar=`<div style="display:flex;gap:6px;align-items:center;margin:0 0 6px"><span class="row" style="margin-right:4px">기간</span>${rbtn('1m','1개월')}${rbtn('3m','3개월')}${rbtn('6m','6개월')}${rbtn('1y','1년')}${rbtn('all','전체')}</div>`;
     let html = '';
