@@ -502,7 +502,8 @@ async function sendCmd(agentId, type, payload){
     agent_id: agentId, type: type,
     requested_by: lget('email','web'),
     idempotency_key: uuid(),
-    expires_at: new Date(Date.now()+120000).toISOString(),
+    // 설정 토글(자동 이관)은 봇이 잠시 꺼져 있어도 켜지면 적용되게 24시간, 매매 명령은 안전상 2분
+    expires_at: new Date(Date.now()+(type==='switch_auto_move' ? 24*3600000 : 120000)).toISOString(),
     payload: payload
   };
   try {
