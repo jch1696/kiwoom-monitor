@@ -1331,6 +1331,24 @@ function statusCard(d){
       <span>주문가능</span><b class="px">$${esc(fmtUSD(d.usd))}</b>
       ${d.open_orders!=null?`<span>미체결</span><b>${esc(d.open_orders)}건</b>`:''}
     </div>`;
+  } else if (isSwitch){
+    // 스위치 카드 요약 — 미러(자체 엔진 원장)에서: 계좌·보유·업다운 포트·떨사오팔 랭크
+    const mr = (_switchMirrors||[]).find(r => (r.payload||{})._task === d.task) || {};
+    const p = mr.payload || {}, g = p.grid || [];
+    const UP=/업다운|Updown/i, TT=/떨사오팔/;
+    const pots = p.pots ?? gNum(gridLookupIn(g,'보유 포트',UP)), pq = p.holding ?? gNum(gridLookupIn(g,'보유 수량',UP));
+    const rks = p.held_ranks ?? gNum(gridLookupIn(g,'보유 랭크',TT)), rq = p.rank_qty ?? gNum(gridLookupIn(g,'보유 수량',TT));
+    const total = (pq!=null && rq!=null) ? Number(pq)+Number(rq) : gNum(gridLookup(g,'보유 수량'));
+    const acct = p.updown_account || d.account || '';
+    const close = p.last_close ?? gNum(gridLookup(g,'마지막 종가'));
+    kv += `<div class="kv">
+      ${close!=null?`<span>종가</span><b class="px">$${esc(fmtUSD(close))}</b>`:''}
+      ${total!=null?`<span>보유</span><b>${esc(total)}주${p.pots!=null?' (+1)':''}</b>`:''}
+      ${pots!=null?`<span>업다운</span><b>포트 ${esc(pots)} · ${esc(pq??'-')}주</b>`:''}
+      ${rks!=null?`<span>떨사오팔</span><b>랭크 ${esc(rks)} · ${esc(rq??'-')}주${(p.ranks||[]).length?' <span style="color:#9aa0a6;font-weight:400">('+(p.ranks||[]).map(r=>'R'+r.rank+' $'+fmtUSD(r.price)).join(', ')+')</span>':''}</b>`:''}
+      ${d.usd!=null?`<span>주문가능</span><b class="px">$${esc(fmtUSD(d.usd))}</b>`:''}
+      ${acct?`<span>계좌</span><b>${esc(acct)}${p.tteol_account&&p.tteol_account!==acct?' / '+esc(p.tteol_account):''}</b>`:''}
+    </div>`;
   } else if (d.usd != null){
     kv += `<div class="kv"><span>주문가능</span><b class="px">$${esc(fmtUSD(d.usd))}</b></div>`;
   }
