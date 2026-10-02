@@ -569,7 +569,8 @@ function coverageOf(d){
   const p = sheetPayloadByName(d.sheet); if(!p) return null;
   const rows = computeSheetJS(p); if(!rows.length) return null;
   const ti = tierInfo(d.sheet, d.balance); if(!ti) return null;
-  const cash = Number(d.usd)||0, price = Number(d.price)||0;
+  const reserved = Number(d.reserved_usd)||0;                 // 걸려 있는 미체결 매수(다음 층) — 주문가능에서 이미 빠진 돈
+  const cash = (Number(d.usd)||0) + reserved, price = Number(d.price)||0;
   const total = parseInt(p.total_lines)||rows.length-1;
   let need = 0; for (let L = ti.tier+1; L <= total; L++) need += rows[L] ? rows[L].invest : 0;   // 남은 층 전부 사는 데 필요한 돈
   let left = cash, cover = ti.tier;                                                             // 현금으로 채울 수 있는 마지막 층
@@ -578,7 +579,7 @@ function coverageOf(d){
   const drop = (price>0 && coverPrice>0) ? (coverPrice/price-1)*100 : null;
   const bottomPrice = rows[total] ? rows[total].avg_price : 0;
   const bottomDrop = (price>0 && bottomPrice>0) ? (bottomPrice/price-1)*100 : null;
-  return { tier: ti.tier, total, cash, need, ratio: need>0 ? Math.min(1, cash/need) : 1, cover, drop, bottomDrop, spare: need>0 ? Math.max(0, cash-need) : cash };
+  return { tier: ti.tier, total, cash, reserved, need, ratio: need>0 ? Math.min(1, cash/need) : 1, cover, drop, bottomDrop, spare: need>0 ? Math.max(0, cash-need) : cash };
 }
 function renderCoverage(status){
   const box = $('coverage'); if(!box) return;
@@ -596,7 +597,7 @@ function renderCoverage(status){
     return `<div class="card" style="background:${pcBg(d.agent_id||d.task)};border-left:6px solid ${pcAccent(d.agent_id||d.task)};">
       <div class="chead"><span class="sym">${esc(d.sheet)}</span><span class="tier">L${c.tier}/${c.total}</span><b style="color:${col};margin-left:auto">${pct}%</b></div>
       <div class="gauge" title="커버율 ${pct}%"><i style="width:${pct}%;background:${col}"></i></div>
-      <div class="row">주문가능 <b class="px">${money(c.cash)}</b> / 남은 층 필요 <b>${money(c.need)}</b></div>
+      <div class="row">현금 <b class="px">${money(c.cash)}</b>${c.reserved?` <span style="color:#9aa0a6">(주문가능 ${money(c.cash-c.reserved)} + 미체결 매수 ${money(c.reserved)})</span>`:''} / 남은 층 필요 <b>${money(c.need)}</b></div>
       <div class="row">${tail}</div>
     </div>`;
   }).join('');
@@ -1328,7 +1329,7 @@ function statusCard(d){
     kv += `<div class="kv">
       <span>현재가</span><b class="px">$${esc(fmtUSD(d.price))}</b>
       <span>보유</span><b>${esc(d.balance)}주</b>
-      <span>주문가능</span><b class="px">$${esc(fmtUSD(d.usd))}</b>
+      <span>주문가능</span><b class="px">$${esc(fmtUSD(d.usd))}${Number(d.reserved_usd)>0?` <span style="color:#9aa0a6;font-weight:400;font-size:11px">+미체결 매수 $${esc(fmtUSD(d.reserved_usd))}</span>`:''}</b>
       ${d.open_orders!=null?`<span>미체결</span><b>${esc(d.open_orders)}건</b>`:''}
     </div>`;
   } else if (isSwitch){
