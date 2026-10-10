@@ -1717,7 +1717,7 @@ async function setFeeOverride(){
   Object.values(_sheets||{}).forEach(s=>{ if(s&&s.name) fees.by_sheet[s.name]=rate; });
   fees.override={rate, since}; fees.ts=new Date().toISOString();
   try {
-    const r=await fetch(`${URL_}/rest/v1/sheets?on_conflict=name`, { method:'POST', headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, 'Content-Type':'application/json', Prefer:'resolution=merge-duplicates,return=minimal' },
+    const r=await fetch(`${URL_}/rest/v1/sheets?on_conflict=user_id,name`, { method:'POST', headers:{ apikey:KEY_, Authorization:'Bearer '+TOKEN_, 'Content-Type':'application/json', Prefer:'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify([{name:'__fees__', payload:fees, version:1}]) });
     if(!r.ok){ $('pnl_msg').textContent=`요율 저장 실패 ${r.status}: ${await r.text()}`; return; }
     _feeRates=fees;
