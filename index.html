@@ -1060,7 +1060,9 @@ function renderSwitchTab(){
   const money=v=>'$'+fmtUSD(v);
   box.innerHTML = rows.map(r=>{
     const p=r.payload||{}, g=p.grid||[], L=p.ladder||{}, task=p._task||r.name.replace(/^__switch__/,'');
-    const st=(_lastStatus||[]).find(d=>String(d.task||'')===task && /^스위치/.test(String(d.sheet||''))) || {};
+    const tid=p._task_id||'';
+    const st=(_lastStatus||[]).find(d=> tid ? String(d.id||'').endsWith(':switch:'+tid)
+                                            : (String(d.task||'')===task && /^스위치/.test(String(d.sheet||'')))) || {};
     const close=gNum(gridLookup(g,'LP'))||gNum(gridLookup(g,'마지막 종가'))||gNum(gridLookup(g,'현재가'))||0;
     const kpi=(k,v,cls='')=>`<div class="kpi"><div class="k">${k}</div><div class="v ${cls}">${v}</div></div>`;
     const tp=gNum(gridLookup(g,'총 수익금')), cyc=gNum(gridLookup(g,'실현손익'));
@@ -1140,7 +1142,7 @@ function renderSwitchTab(){
       ${p.engine==='local' && p._agent ? `<div class="row" style="display:flex;align-items:center;gap:8px;margin:4px 0 8px">
         <span>떨사오팔→업다운 자동 이관:</span>
         <b class="${p.auto_move!==false?'gain':'loss'}">${p.auto_move!==false?'켬':'끔 (기다리는 중)'}</b>
-        <button class="ghost" style="padding:2px 9px;font-size:12px" onclick="sendCmd('${esc(p._agent)}','switch_auto_move',{nickname:'${esc(task).replace(/'/g,'')}',on:${p.auto_move!==false?'false':'true'}})">${p.auto_move!==false?'끄기 (이번엔 기다리기)':'켜기'}</button>
+        <button class="ghost" style="padding:2px 9px;font-size:12px" onclick="sendCmd('${esc(p._agent)}','switch_auto_move',{task_id:'${esc(p._task_id||'')}',nickname:'${esc(task).replace(/'/g,'')}',on:${p.auto_move!==false?'false':'true'}})">${p.auto_move!==false?'끄기 (이번엔 기다리기)':'켜기'}</button>
         ${Number(p.pots)===0 && Number(p.held_ranks)>0 ? '<span class="loss">⚠ 포트 0 · 랭크 '+esc(p.held_ranks)+'개 보유 — 켜져 있으면 오늘 실행 때 전부 포트로 넘깁니다</span>' : ''}
       </div>` : ''}
       <div class="kpis">${kpis}</div>
@@ -1347,7 +1349,9 @@ function statusCard(d){
     </div>`;
   } else if (isSwitch){
     // 스위치 카드 요약 — 미러(자체 엔진 원장)에서: 계좌·보유·업다운 포트·떨사오팔 랭크
-    const mr = (_switchMirrors||[]).find(r => (r.payload||{})._task === d.task) || {};
+    const sid = String(d.id||'').split(':switch:')[1] || '';
+    const mr = (_switchMirrors||[]).find(r => sid ? (r.payload||{})._task_id === sid || r.name === '__switch__'+sid
+                                                   : (r.payload||{})._task === d.task) || {};
     const p = mr.payload || {}, g = p.grid || [];
     const UP=/업다운|Updown/i, TT=/떨사오팔/;
     const pots = p.pots ?? gNum(gridLookupIn(g,'보유 포트',UP)), pq = p.holding ?? gNum(gridLookupIn(g,'보유 수량',UP));
@@ -1373,7 +1377,7 @@ function statusCard(d){
   const why = reason && !/^주문 조건 미충족$/.test(reason)
     ? `<div class="row" style="margin-top:6px;color:#9AA0A6">${esc(reason)}</div>` : '';
   const btns = d.agent_id && d.sheet ? `<div class="cmds">
-        <button class="runnow" onclick="sendCmd('${esc(d.agent_id)}','run_now',{sheet:'${esc(d.sheet)}',nickname:'${esc(d.task||'').replace(/'/g,'')}'})">즉시 실행</button>
+        <button class="runnow" onclick="sendCmd('${esc(d.agent_id)}','run_now',${isSwitch && String(d.id||'').includes(':switch:') ? `{task_id:'${esc(String(d.id).split(':switch:')[1])}'}` : `{sheet:'${esc(d.sheet)}',nickname:'${esc(d.task||'').replace(/'/g,'')}'}`})">즉시 실행</button>
         <button class="${isOn?'toggle-off':'toggle-on'}" onclick="sendCmd('${esc(d.agent_id)}','set_active',{sheet:'${esc(d.sheet)}',active:${!isOn}})">${isOn?'비활성화':'활성화'}</button>
       </div>` : '';
   return `
