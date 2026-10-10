@@ -678,7 +678,7 @@ function barsSVG(items, opt={}){
       ? `M${x},${y0}V${top+r}a${r},${r} 0 0 1 ${r},-${r}h${bw-2*r}a${r},${r} 0 0 1 ${r},${r}V${y0}Z`
       : `M${x},${y0}V${y0+hh-r}a${r},${r} 0 0 0 ${r},${r}h${bw-2*r}a${r},${r} 0 0 0 ${r},-${r}V${y0}Z`;
     const label = (i===iMax||i===iMin||i===n-1) ? `<text x="${x+bw/2}" y="${v>=0? top-5 : Math.min(top+hh+13, h-padB-4)}" text-anchor="middle" font-size="11" fill="${VIZ.tx}">${fmt(v)}</text>` : '';
-    const xl = (n<=14 || i%Math.ceil(n/12)===0 || i===n-1) ? `<text x="${x+bw/2}" y="${h-6}" text-anchor="middle" font-size="11" fill="${VIZ.tx2}">${_tipEsc(it.short||it.label)}</text>` : '';
+    const xl = (n<=14 || (n-1-i)%Math.ceil(n/12)===0) ?   /* 마지막 달부터 거꾸로 같은 간격 → 끝 라벨이 앞 라벨과 겹치지 않음 */ `<text x="${x+bw/2}" y="${h-6}" text-anchor="middle" font-size="11" fill="${VIZ.tx2}">${_tipEsc(it.short||it.label)}</text>` : '';
     return `<g onmousemove="tipShow(event,'${_tipEsc(it.label)}<br><b>${_tipEsc(fmt(v))}</b>')" onmouseleave="tipHide()">
       <rect x="${padL+i*slot}" y="${padT}" width="${slot}" height="${h-padT-padB}" fill="transparent"/>
       <path d="${path}" fill="${VIZ.s1}"/>${label}${xl}</g>`;
