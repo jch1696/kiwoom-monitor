@@ -59,7 +59,7 @@
   .kv { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:13px; color:#B8BCC4; margin-top:4px; }
   .kv b { color:#E6E6E6; font-weight:600; }
   .px { font-variant-numeric:tabular-nums; }
-  .ago { font-size:11px; color:#777; margin-top:8px; } .ago.stale { color:#E0A106; } .ago.dead { color:#ff8a8a; }
+  .ago { font-size:11px; color:#777; margin-top:8px; } .ago.stale { color:#E0A106; background:none; } .ago.dead { color:#ff8a8a; background:none; }  /* 전역 .stale(PC 상태 점 배경)이 덮어써 노란 막대로 보이던 문제 */
   .nextrow { display:flex; gap:12px; margin-top:6px; font-size:13px; }
   .nextrow .buy { color:#ff9b9b; } .nextrow .sell { color:#8fc2ff; }
   @media (max-width:600px){
