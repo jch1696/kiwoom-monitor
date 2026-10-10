@@ -1073,6 +1073,7 @@ function renderSwitchTab(){
       kpi('P+R', gridLookup(g,'P+R')||'-'),
       kpi('보유 수량', gridLookup(g,'보유 수량')||'-'),
       kpi('투자금', gridMoney(g,'투자금')),
+      (p.params && p.params.reinvest_rate!=null) ? kpi('재투자율', `${(Number(p.params.reinvest_rate)*100).toFixed(0)}%<span class="k" style="display:block;margin-top:2px">이익 중 $${fmtUSD(Number(p.reinvest)||0)} 투자 · 분할 ${Number(p.total_splits||p.params.seed_splits).toFixed(1)}</span>`) : '',
       kpi('1회 매수금', gridMoney(g,'1회 매수금')),
       st.usd!=null ? kpi('주문가능', money(st.usd), 'wd') : ''].join('');
     const grp=(title, items)=>`<div class="grp"><h4>${title}</h4><div class="kv">${items.map(([k,v])=>`<span>${k}</span><b>${v}</b>`).join('')}</div></div>`;
