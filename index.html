@@ -1092,9 +1092,9 @@ function renderSwitchTab(){
     const potTable = run.length ? (()=>{
       const avg=Number(lastUp.avg)||0, gap = close>0&&avg>0 ? (close/avg-1)*100 : null;
       const rowsH=run.map(r=>`<tr><td><b>${esc(r.pot)}</b></td><td>${esc(r.date)}</td><td><span class="bs ${r.kind==='매도'?'sell':'buy'}">${esc(r.kind==='떨'?'이관':r.kind)}</span></td><td>$${fmtUSD(r.price)}</td><td>${esc(r.qty)}주</td><td>${esc(r.holding)}주</td><td>$${fmtUSD(r.avg)}</td></tr>`).join('');
-      return `<div class="grp" style="margin-top:8px"><h4>업다운 보유 포트 (포트 ${esc(lastUp.pot)} · ${esc(lastUp.holding)}주 · 평단 $${fmtUSD(avg)}${gap==null?'':` · 종가 대비 <span class="${gap>=0?'gain':'loss'}">${gap>=0?'+':''}${gap.toFixed(2)}%</span>`})</h4>
+      return `<div class="grp" style="margin-top:8px"><h4>업다운 보유 포트 (포트 ${esc(p.pots!=null?p.pots:(lastUp.kind==='매도'?Number(lastUp.pot)-1:lastUp.pot))} · ${esc(lastUp.holding)}주 · 평단 $${fmtUSD(avg)}${gap==null?'':` · 종가 대비 <span class="${gap>=0?'gain':'loss'}">${gap>=0?'+':''}${gap.toFixed(2)}%</span>`})</h4>
         <table class="lntab" style="margin-top:6px;width:auto"><tr><th>포트</th><th>날짜</th><th>구분</th><th>체결가</th><th>수량</th><th>보유</th><th>평단</th></tr>${rowsH}</table>
-        <div class="row">업다운은 포트를 평단으로 합쳐 관리합니다. 매도는 종가가 LP 이상일 때 보유÷포트 만큼 LP 에 팝니다. '이관'은 떨사오팔 랭크에서 넘어온 포트.</div></div>`;
+        <div class="row">이 표는 지금 보유를 이룬 거래 기록(매수·매도 누적)입니다. 매도 행의 '포트'는 판 포트 번호이고, 팔면 보유 포트 수는 하나 줄어듭니다. 업다운은 포트를 평단으로 합쳐 관리합니다. 매도는 종가가 LP 이상일 때 보유÷포트 만큼 LP 에 팝니다. '이관'은 떨사오팔 랭크에서 넘어온 포트.</div></div>`;
     })() : '';
     const tt=grp('떨사오팔', [['보유 랭크', gridLookupIn(g,'보유 랭크',TT)||'0'],['보유 수량', (gridLookupIn(g,'보유 수량',TT)||'0')+'주'],['실현손익', ttPnl==null?'-':`<span class="${ttPnl>=0?'gain':'loss'}">${sMoney(ttPnl)}</span>`],['랭크 복리 기준', gridLookupIn(g,'랭크 복리 기준',TT)||gridLookupIn(g,'랭크 복리',TT)||'-'],['1회 매수금', gridMoney(g,'1회 매수금',TT)],['시드 사용', gridMoney(g,'시드 사용',TT)],['매도 대기', (L.tteol_sells||[]).length?(L.tteol_sells||[]).map(o=>`${o.qty}주 @ $${fmtUSD(o.price)}`).join(', '):'없음']]);
     // 실현손익: 누적 선 + 최근 8건
