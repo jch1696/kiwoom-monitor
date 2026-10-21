@@ -213,6 +213,7 @@
     <div class="tabpane" data-pane="monitor">
       <div id="summary" class="summary"></div>
       <div id="coverage"></div>
+      <div id="fng"></div>
       <h2>내 PC (에이전트)</h2>
       <div id="agents" class="grid"></div>
       <h2>작업 현재 상태</h2>
@@ -798,6 +799,33 @@ function renderOrderEditor(){
 }
 
 let _agentNames = {};
+// 공포·탐욕 지수(봇이 1시간마다 올림): 미국 주식(CNN) + 암호화폐(alternative.me)
+function fngLabel(v){ v=Number(v); if(!(v>=0)) return '-'; return v<25?'극단적 공포':v<45?'공포':v<55?'중립':v<75?'탐욕':'극단적 탐욕'; }
+function fngColor(v){ v=Number(v); return v<25?'#e24b4a':v<45?'#f08c4a':v<55?'#c9c9c9':v<75?'#8fd14f':'#1DB954'; }
+function fngGauge(title, d){
+  if(!d || d.score==null) return `<div class="card"><div class="lnhead">${esc(title)}</div><div class="row">자료 없음</div></div>`;
+  const v=Number(d.score), pct=Math.max(0,Math.min(100,v));
+  const prev = d.prev_close!=null ? Number(d.prev_close) : null;
+  const delta = prev!=null ? (v-prev) : null;
+  const hist = [['전일',d.prev_close],['1주 전',d.week],['1달 전',d.month],['1년 전',d.year]].filter(x=>x[1]!=null)
+     .map(x=>`<span style="margin-right:10px;color:#9aa0a6">${x[0]} <b style="color:${fngColor(x[1])}">${Math.round(Number(x[1]))}</b></span>`).join('');
+  return `<div class="card">
+    <div class="lnhead">${esc(title)} <span style="font-size:22px;font-weight:700;color:${fngColor(v)};margin-left:8px">${Math.round(v)}</span>
+      <span style="color:${fngColor(v)};margin-left:6px">${fngLabel(v)}</span>
+      ${delta==null?'':`<span style="color:#9aa0a6;margin-left:8px">${delta>=0?'▲':'▼'}${Math.abs(delta).toFixed(1)}</span>`}</div>
+    <div style="position:relative;height:10px;border-radius:5px;margin:8px 0 6px;background:linear-gradient(90deg,#e24b4a 0%,#f08c4a 35%,#c9c9c9 50%,#8fd14f 65%,#1DB954 100%)">
+      <div style="position:absolute;left:calc(${pct}% - 6px);top:-4px;width:12px;height:18px;border-radius:3px;background:#fff;border:2px solid #111"></div>
+    </div>
+    <div class="row" style="display:flex;justify-content:space-between;color:#9aa0a6;font-size:11px"><span>0 극단적 공포</span><span>50</span><span>극단적 탐욕 100</span></div>
+    <div class="row" style="margin-top:4px">${hist}</div></div>`;
+}
+function renderFng(p){
+  const box=$('fng'); if(!box) return;
+  if(!p){ box.innerHTML=''; return; }
+  const ts = p._ts ? new Date(p._ts) : null;
+  box.innerHTML = `<h2>공포·탐욕 지수 <span class="row" style="font-weight:normal;color:#9aa0a6">${ts?fmtAgo(ts):''}</span></h2>
+    <div class="grid">${fngGauge('미국 주식 (CNN)', p.stock)}${fngGauge('암호화폐', p.crypto)}</div>`;
+}
 function renderAgents(rows){
   _agentNames = {};
   (rows||[]).forEach(a => { _agentNames[a.agent_id] = a.nickname || a.agent_id; });
@@ -853,6 +881,7 @@ function renderSheets(rows){
   // '__' 로 시작하는 행은 시트 설정이 아니라 내부 데이터(스위치 시트 미러)
   renderSwitchMirror(rows.filter(r => String(r.name||'').startsWith('__switch__')));
   const feeRow = rows.find(r => r.name === '__fees__'); _feeRates = (feeRow && feeRow.payload) || {}; showFeeOverride();
+  const fngRow = rows.find(r => r.name === '__fng__'); renderFng(fngRow ? fngRow.payload : null);
   rows = rows.filter(r => !String(r.name||'').startsWith('__'));
   _sheets = {}; _lastSheets = rows;
   const hadSheets = _sheetsReady; _sheetsReady = true;
