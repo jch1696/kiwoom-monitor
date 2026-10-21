@@ -1091,10 +1091,20 @@ function renderSwitchTab(){
     const lastUp=run[run.length-1];
     const potTable = run.length ? (()=>{
       const avg=Number(lastUp.avg)||0, gap = close>0&&avg>0 ? (close/avg-1)*100 : null;
-      const rowsH=run.map(r=>`<tr><td><b>${esc(r.pot)}</b></td><td>${esc(r.date)}</td><td><span class="bs ${r.kind==='매도'?'sell':'buy'}">${esc(r.kind==='떨'?'이관':r.kind)}</span></td><td>$${fmtUSD(r.price)}</td><td>${esc(r.qty)}주</td><td>${esc(r.holding)}주</td><td>$${fmtUSD(r.avg)}</td></tr>`).join('');
-      return `<div class="grp" style="margin-top:8px"><h4>업다운 보유 포트 (포트 ${esc(p.pots!=null?p.pots:(lastUp.kind==='매도'?Number(lastUp.pot)-1:lastUp.pot))} · ${esc(lastUp.holding)}주 · 평단 $${fmtUSD(avg)}${gap==null?'':` · 종가 대비 <span class="${gap>=0?'gain':'loss'}">${gap>=0?'+':''}${gap.toFixed(2)}%</span>`})</h4>
-        <table class="lntab" style="margin-top:6px;width:auto"><tr><th>포트</th><th>날짜</th><th>구분</th><th>체결가</th><th>수량</th><th>보유</th><th>평단</th></tr>${rowsH}</table>
-        <div class="row">이 표는 지금 보유를 이룬 거래 기록(매수·매도 누적)입니다. 매도 행의 '포트'는 판 포트 번호이고, 팔면 보유 포트 수는 하나 줄어듭니다. 업다운은 포트를 평단으로 합쳐 관리합니다. 매도는 종가가 LP 이상일 때 보유÷포트 만큼 LP 에 팝니다. '이관'은 떨사오팔 랭크에서 넘어온 포트.</div></div>`;
+      const nPots = p.pots!=null ? Number(p.pots) : (lastUp.kind==='매도'?Number(lastUp.pot)-1:Number(lastUp.pot));
+      const buys = run.filter(r=>r.kind!=='매도'), sells = run.filter(r=>r.kind==='매도');
+      // 기본: 지금 들고 있는 포트만(매수 기록 중 최근 nPots 개 — 팔린 포트는 오래된 것부터 빠진 것으로 간주). 전체 기록은 펼쳐 보기
+      const held = buys.slice(Math.max(0, buys.length - nPots));
+      const rowsHeld = held.map((r,i)=>`<tr><td><b>${i+1}</b></td><td>${esc(r.date)}</td><td><span class="bs buy">${esc(r.kind==='떨'?'이관':r.kind)}</span></td><td>$${fmtUSD(r.price)}</td><td>${esc(r.qty)}주</td></tr>`).join('');
+      const rowsAll=run.map(r=>`<tr><td><b>${esc(r.pot)}</b></td><td>${esc(r.date)}</td><td><span class="bs ${r.kind==='매도'?'sell':'buy'}">${esc(r.kind==='떨'?'이관':r.kind)}</span></td><td>$${fmtUSD(r.price)}</td><td>${esc(r.qty)}주</td><td>${esc(r.holding)}주</td><td>$${fmtUSD(r.avg)}</td></tr>`).join('');
+      const sellNote = sells.length ? `<div class="row" style="color:#9aa0a6">이번 사이클 매도 ${sells.length}회: ${sells.map(r=>`${esc(r.date)} ${esc(r.qty)}주 @$${fmtUSD(r.price)}`).join(' · ')}</div>` : '';
+      const fid='upall_'+String(p._task_id||'').replace(/[^a-z0-9]/gi,'');
+      return `<div class="grp" style="margin-top:8px"><h4>업다운 보유 포트 (포트 ${esc(nPots)} · ${esc(lastUp.holding)}주 · 평단 $${fmtUSD(avg)}${gap==null?'':` · 종가 대비 <span class="${gap>=0?'gain':'loss'}">${gap>=0?'+':''}${gap.toFixed(2)}%</span>`})</h4>
+        <table class="lntab" style="margin-top:6px;width:auto"><tr><th>포트</th><th>매수일</th><th>구분</th><th>체결가</th><th>수량</th></tr>${rowsHeld}</table>
+        ${sellNote}
+        <div class="row">업다운은 포트를 평단으로 합쳐 관리하므로 어느 포트가 팔렸는지는 구분하지 않습니다(위 표는 최근 매수 ${esc(nPots)}건). 매도는 종가가 LP 이상일 때 보유÷포트 만큼 LP 에 팝니다. '이관'은 떨사오팔 랭크에서 넘어온 포트.
+          <button class="ghost" onclick="const e=document.getElementById('${fid}');e.classList.toggle('hidden');this.textContent=e.classList.contains('hidden')?'거래 기록 전체 보기 ▾':'기록 접기 ▴'">거래 기록 전체 보기 ▾</button></div>
+        <div id="${fid}" class="hidden"><table class="lntab" style="margin-top:6px;width:auto"><tr><th>포트</th><th>날짜</th><th>구분</th><th>체결가</th><th>수량</th><th>보유</th><th>평단</th></tr>${rowsAll}</table></div></div>`;
     })() : '';
     const tt=grp('떨사오팔', [['보유 랭크', gridLookupIn(g,'보유 랭크',TT)||'0'],['보유 수량', (gridLookupIn(g,'보유 수량',TT)||'0')+'주'],['실현손익', ttPnl==null?'-':`<span class="${ttPnl>=0?'gain':'loss'}">${sMoney(ttPnl)}</span>`],['랭크 복리 기준', gridLookupIn(g,'랭크 복리 기준',TT)||gridLookupIn(g,'랭크 복리',TT)||'-'],['1회 매수금', gridMoney(g,'1회 매수금',TT)],['시드 사용', gridMoney(g,'시드 사용',TT)],['매도 대기', (L.tteol_sells||[]).length?(L.tteol_sells||[]).map(o=>`${o.qty}주 @ $${fmtUSD(o.price)}`).join(', '):'없음']]);
     // 실현손익: 누적 선 + 최근 8건
