@@ -222,12 +222,14 @@
 
     <div class="tabpane hidden" data-pane="sheets">
       <h2>시트 설정 (원격 편집 → PC 자동 반영)</h2>
+      <div id="sheets_chips"></div>
       <div id="sheets" class="grid"></div>
       <div id="lnpanel" class="hidden lnpanel"></div>
     </div>
 
     <div class="tabpane hidden" data-pane="settle">
       <h2>일일 정산 (매일 지정 시각 자동 기록)</h2>
+      <div id="settle_chips"></div>
       <div id="settle_cards" class="grid"></div>
       <div id="settle_chart"></div>
       <h2>정산 기록</h2>
@@ -876,8 +878,10 @@ async function deleteAgent(agentId, nick){
 // ── 시트 설정 원격 편집 ──────────────────────────────────────
 let _sheets = {};
 let _sheetsReady = false;
+let _lastSheetRows = null;
 function renderSheets(rows){
   rows = rows || [];
+  _lastSheetRows = rows;
   // '__' 로 시작하는 행은 시트 설정이 아니라 내부 데이터(스위치 시트 미러)
   renderSwitchMirror(rows.filter(r => String(r.name||'').startsWith('__switch__')));
   const feeRow = rows.find(r => r.name === '__fees__'); _feeRates = (feeRow && feeRow.payload) || {}; showFeeOverride();
@@ -885,7 +889,7 @@ function renderSheets(rows){
   rows = rows.filter(r => !String(r.name||'').startsWith('__'));
   _sheets = {}; _lastSheets = rows;
   const hadSheets = _sheetsReady; _sheetsReady = true;
-  const ordered = rows.slice().sort((a,b)=> sheetCmp(a.name, b.name));   // 사용자 지정 순서
+  const ordered = rows.slice().filter(r => !_monPerson || personOfSheet(r.name)===_monPerson).sort((a,b)=> sheetCmp(a.name, b.name));   // 사용자 지정 순서(사람 필터 적용)
   const html = ordered.map((s,i) => {
     const p = s.payload || {};
     _sheets[i] = { name: s.name, payload: p, version: s.version||1 };
@@ -911,6 +915,7 @@ function renderSheets(rows){
       </div>
     </div>`;
   }).join('') || '<div class="row">원격 시트 없음 — PC 시트 탭에서 \'원격↑\'로 올리세요.</div>';
+  if($('sheets_chips')) $('sheets_chips').innerHTML = personChipsHtml();
   $('sheets').innerHTML = html;
   if(!_autofilledOnce){ _autofilledOnce = true; autofillTrade(); }   // 시트 로드 후 1회 자동입력
 }
@@ -1434,18 +1439,14 @@ function renderStatus(rows){
   if(!rows.length){ $('status').innerHTML = '<div class="row">데이터 없음</div>'; return; }
   // 시트설정 색 매핑용: 시트명/작업별명 → agent_id (시트설정엔 agent_id가 없으므로)
   _pcKeyBySheet = {}; _pcKeyByNick = {}; _priceBySheet = {};
-  rows.forEach(d => { if(d.sheet){ _pcKeyBySheet[d.sheet] = d.agent_id; if(d.price!=null) _priceBySheet[d.sheet] = d.price; } if(d.task) _pcKeyByNick[d.task] = d.agent_id; });
+  rows.forEach(d => { if(d.sheet){ _pcKeyBySheet[d.sheet] = d.agent_id; if(d.price!=null) _priceBySheet[d.sheet] = d.price; if(d.task) _personBySheet[d.sheet]=String(d.task).trim(); } if(d.task) _pcKeyByNick[d.task] = d.agent_id; });
   // PC(agent_id)별로 묶어서 표시. 그룹은 별명순으로 고정 정렬(순서가 안 바뀌도록).
   const groups = {};
   rows.forEach(d => { (groups[d.agent_id||'-'] = groups[d.agent_id||'-'] || []).push(d); });
   const aname = aid => (_agentNames[aid] || (aid||''));
   const order = Object.keys(groups).sort((a,b) => aname(a).localeCompare(aname(b), 'ko'));
   // 사람(작업 별명)별 보기 — 칩으로 고르면 그 사람 카드만, 기억됨
-  const persons = [...new Set(rows.map(d=>String(d.task||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
-  if(_monPerson && persons.indexOf(_monPerson)<0) _monPerson='';
-  const chips = persons.length>1 ? `<div class="row" style="margin:4px 0 8px;display:flex;gap:6px;flex-wrap:wrap;">
-      ${[''].concat(persons).map(pn=>`<button class="ghost" style="${(_monPerson===pn)?'background:#2b3a55;border-color:#5b8def;':''}" onclick="setMonPerson('${esc(pn).replace(/'/g,'')}')">${pn?('👤 '+esc(pn)):'전체'}</button>`).join('')}
-    </div>` : '';
+  const chips = personChipsHtml();
   const money = v => '$'+Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
   $('status').innerHTML = chips + order.map(aid => {
     const name = _agentNames[aid] || (aid||'').slice(0,8) || 'PC';
@@ -1468,7 +1469,24 @@ function renderStatus(rows){
   }).join('');
 }
 let _monPerson = (()=>{ try { return localStorage.getItem('mon_person')||''; } catch(e){ return ''; } })();
-function setMonPerson(pn){ _monPerson = pn||''; try { localStorage.setItem('mon_person', _monPerson); } catch(e){} renderStatus(_lastStatus); }
+let _personBySheet = {};
+// 시트의 사람: 상태 카드의 작업 별명 → 없으면 시트 이름 끝(SOXL_창호 → 창호)
+function personOfSheet(name){ name=String(name||''); if(_personBySheet[name]) return _personBySheet[name]; const i=name.lastIndexOf('_'); return i>0 ? name.slice(i+1).trim() : ''; }
+function knownPersons(){
+  const set=new Set(Object.values(_personBySheet));
+  (_lastSheets||[]).forEach(r=>{ const pn=personOfSheet(r.name); if(pn) set.add(pn); });
+  (_settlements||[]).forEach(r=>{ const pn=personOfSheet(r.sheet); if(pn) set.add(pn); });
+  return [...set].filter(Boolean).sort((a,b)=>a.localeCompare(b,'ko'));
+}
+function personChipsHtml(){
+  const persons=knownPersons(); if(persons.length<2) return '';
+  if(_monPerson && persons.indexOf(_monPerson)<0) _monPerson='';
+  return `<div class="row" style="margin:4px 0 8px;display:flex;gap:6px;flex-wrap:wrap;">${[''].concat(persons).map(pn=>`<button class="ghost" style="${(_monPerson===pn)?'background:#2b3a55;border-color:#5b8def;':''}" onclick="setMonPerson('${esc(pn).replace(/'/g,'')}')">${pn?('👤 '+esc(pn)):'전체'}</button>`).join('')}</div>`;
+}
+function setMonPerson(pn){
+  _monPerson = pn||''; try { localStorage.setItem('mon_person', _monPerson); } catch(e){}
+  renderStatus(_lastStatus); if(_lastSheetRows) renderSheets(_lastSheetRows); drawSettlements();
+}
 
 let _settlements = [];
 // 선택값을 유지하며 드롭다운 옵션 채우기
@@ -1497,7 +1515,8 @@ function drawSettlements(){
   const fs = $('f_sheet') ? $('f_sheet').value : '';
   const fy = $('f_symbol') ? $('f_symbol').value : '';
   const detail = $('f_detail') ? $('f_detail').checked : false;
-  let rows = _settlements.filter(d => (!fs || d.sheet===fs) && (!fy || d.symbol===fy));
+  let rows = _settlements.filter(d => (!fs || d.sheet===fs) && (!fy || d.symbol===fy) && (!_monPerson || personOfSheet(d.sheet)===_monPerson));
+  if($('settle_chips')) $('settle_chips').innerHTML = personChipsHtml();
   rows = rows.slice().sort((a,b)=>String(b.date).localeCompare(String(a.date)) || String(a.sheet).localeCompare(String(b.sheet)));
 
   // ── 시트별 최신 정산 카드 + 잔고수익 스파크라인(최근 40일) ──
