@@ -1440,14 +1440,35 @@ function renderStatus(rows){
   rows.forEach(d => { (groups[d.agent_id||'-'] = groups[d.agent_id||'-'] || []).push(d); });
   const aname = aid => (_agentNames[aid] || (aid||''));
   const order = Object.keys(groups).sort((a,b) => aname(a).localeCompare(aname(b), 'ko'));
-  $('status').innerHTML = order.map(aid => {
+  // 사람(작업 별명)별 보기 — 칩으로 고르면 그 사람 카드만, 기억됨
+  const persons = [...new Set(rows.map(d=>String(d.task||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
+  if(_monPerson && persons.indexOf(_monPerson)<0) _monPerson='';
+  const chips = persons.length>1 ? `<div class="row" style="margin:4px 0 8px;display:flex;gap:6px;flex-wrap:wrap;">
+      ${[''].concat(persons).map(pn=>`<button class="ghost" style="${(_monPerson===pn)?'background:#2b3a55;border-color:#5b8def;':''}" onclick="setMonPerson('${esc(pn).replace(/'/g,'')}')">${pn?('👤 '+esc(pn)):'전체'}</button>`).join('')}
+    </div>` : '';
+  const money = v => '$'+Number(v||0).toLocaleString('en-US',{maximumFractionDigits:0});
+  $('status').innerHTML = chips + order.map(aid => {
     const name = _agentNames[aid] || (aid||'').slice(0,8) || 'PC';
-    // PC 안의 카드는 사용자 지정 시트 순서로
-    const cards = groups[aid].slice().sort((x,y)=>sheetCmp(x.sheet,y.sheet)).map(statusCard).join('');
+    // PC 안에서 사람별로 묶고, 사람 안은 사용자 지정 시트 순서로
+    const byP = {};
+    groups[aid].forEach(d=>{ const pn=String(d.task||'').trim()||'(이름 없음)'; (byP[pn]=byP[pn]||[]).push(d); });
+    const pnames = Object.keys(byP).sort((a,b)=>a.localeCompare(b,'ko')).filter(pn=>!_monPerson || pn===_monPerson);
+    if(!pnames.length) return '';
+    const sections = pnames.map(pn=>{
+      const list = byP[pn].slice().sort((x,y)=>sheetCmp(x.sheet,y.sheet));
+      const isTrade = d => !/^스위치/.test(String(d.sheet||''));
+      const cash = list.filter(isTrade).reduce((a,d)=>a+(Number(d.usd)||0),0);
+      const held = list.filter(isTrade).reduce((a,d)=>a+(Number(d.price)||0)*(Number(d.balance)||0),0);
+      const nSw = list.filter(d=>!isTrade(d)).length;
+      const sub = `👤 ${esc(pn)} <span style="font-weight:normal;color:#9aa0a6;font-size:12px;margin-left:8px">${list.length-nSw}개 매매${nSw?` · 스위치 ${nSw}`:''} · 주문가능 합계 ${money(cash)} · 보유 평가 ${money(held)}</span>`;
+      return `<div class="pperson" style="margin:6px 0 10px;"><div style="font-weight:700;margin:6px 0 4px;color:#cfd3da;">${sub}</div><div class="grid">${list.map(statusCard).join('')}</div></div>`;
+    }).join('');
     // 배경은 시트(카드)별로 — 그룹 박스는 헤더만(전체 색칠 안 함)
-    return `<div class="pcgroup"><div class="pchead">🖥 ${esc(name)}</div><div class="grid">${cards}</div></div>`;
+    return `<div class="pcgroup"><div class="pchead">🖥 ${esc(name)}</div>${sections}</div>`;
   }).join('');
 }
+let _monPerson = (()=>{ try { return localStorage.getItem('mon_person')||''; } catch(e){ return ''; } })();
+function setMonPerson(pn){ _monPerson = pn||''; try { localStorage.setItem('mon_person', _monPerson); } catch(e){} renderStatus(_lastStatus); }
 
 let _settlements = [];
 // 선택값을 유지하며 드롭다운 옵션 채우기
