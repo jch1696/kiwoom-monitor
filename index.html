@@ -1471,7 +1471,7 @@ function renderStatus(rows){
 let _monPerson = (()=>{ try { return localStorage.getItem('mon_person')||''; } catch(e){ return ''; } })();
 let _personBySheet = {};
 // 시트의 사람: 상태 카드의 작업 별명 → 없으면 시트 이름 끝(SOXL_창호 → 창호)
-function personOfSheet(name){ name=String(name||''); if(_personBySheet[name]) return _personBySheet[name]; const i=name.lastIndexOf('_'); return i>0 ? name.slice(i+1).trim() : ''; }
+function personOfSheet(name){ name=String(name||'').trim(); if(_personBySheet[name]) return _personBySheet[name]; if(Object.values(_personBySheet).indexOf(name)>=0) return name; /* 정산 행의 sheet 는 작업 별명 */ const i=name.lastIndexOf('_'); return i>0 ? name.slice(i+1).trim() : name; }
 function knownPersons(){
   const set=new Set(Object.values(_personBySheet));
   (_lastSheets||[]).forEach(r=>{ const pn=personOfSheet(r.name); if(pn) set.add(pn); });
