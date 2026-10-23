@@ -1989,7 +1989,7 @@ function renderMonthly(R){
   const box=$('pnl_monthly'); if(!box) return;
   // 일반 시트 + 스위치 그룹을 '시트 순서' 설정대로 정렬(열 위치도 함께 이동)
   const sheets=sheetSort([...new Set([
-    ..._trades.filter(t=>t.side==='sell').map(t=>t.sheet).filter(Boolean),
+    ..._trades.map(t=>t.sheet).filter(Boolean),      // 매도가 아직 없는 새 시트도 열에 넣는다(투입원금 합계에도 포함)
     ...(_switchPnl||[]).map(p=>p.sheet).filter(Boolean),
   ])]);
   const byMonth={}, byYear={};
@@ -2075,7 +2075,8 @@ async function splitTrade(id){
   const sum = parts.reduce((a,p)=>a+p.qty,0);
   if (sum !== Number(t.qty)) { $('pnl_msg').textContent=`수량 합 ${sum} ≠ 원래 ${t.qty}`; return; }
   const H = { apikey:KEY_, Authorization:'Bearer '+TOKEN_, 'Content-Type':'application/json', Prefer:'return=representation' };
-  const rows = parts.map(p=>({ sheet:t.sheet, symbol:t.symbol||null, date:t.date, tier:p.tier, side:t.side, price:t.price, qty:p.qty,
+  const rows = parts.map((p,i)=>({ sheet:t.sheet, symbol:t.symbol||null, date:t.date, tier:p.tier, side:t.side, price:t.price, qty:p.qty,
+    created_at: t.created_at ? new Date(new Date(t.created_at).getTime()+i).toISOString() : undefined,   // 나눈 행도 원래 체결 시각 유지(표 순서 안 흐트러지게)
     fee: Math.round((Number(t.fee)||0)*p.qty/Number(t.qty)*100)/100, cycle:t.cycle||1, note:t.note||null }));
   try {
     const r = await fetch(`${URL_}/rest/v1/trades`, { method:'POST', headers:H, body: JSON.stringify(rows) });
