@@ -251,7 +251,8 @@
       <div id="pnl_charts"></div>
       <button class="ghost" id="btn_monthly" onclick="toggleMonthly()">📅 월별 수익 합계 펼치기 ▾</button>
       <div id="pnl_monthly" class="hidden"></div>
-      <div class="card" style="margin:10px 0;">
+      <button class="ghost" id="btn_manual" onclick="const e=document.getElementById('manual_entry');e.classList.toggle('hidden');this.textContent=e.classList.contains('hidden')?'✏ 수동 입력 펼치기 ▾':'✏ 수동 입력 접기 ▴'">✏ 수동 입력 펼치기 ▾</button>
+      <div id="manual_entry" class="card hidden" style="margin:10px 0;">
         <input id="p_fee" type="hidden" value="0">
         <div class="pform">
           <div class="fld"><label>시트</label><select id="p_sheet" onchange="onSheetChange()"><option value="">시트 선택</option></select></div>
